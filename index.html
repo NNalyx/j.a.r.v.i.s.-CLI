@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Jarvis CLI</title>
+  <script>window.API_TOKEN = "{{API_TOKEN}}";</script>
+  <link rel="stylesheet" href="/static/app.css?v=6">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+</head>
+<body>
+  <!-- Загрузочный экран -->
+  <div id="loading-screen" class="loading-screen">
+    <div class="loading-cubes" aria-hidden="true">
+      <div class="cube"></div>
+      <div class="cube"></div>
+      <div class="cube"></div>
+      <div class="cube"></div>
+      <div class="cube"></div>
+    </div>
+    <div class="loading-content">
+      <div class="loading-brand">
+        <div class="loading-brand-mark">▼</div>
+        <h1>Jarvis CLI</h1>
+      </div>
+      <p class="loading-subtitle">Локальный AI-ассистент</p>
+      
+      <section id="preset-setup-panel" class="loading-panel glow hidden">
+        <div class="panel-title-row">
+          <div class="panel-title">Первая настройка</div>
+          <button id="preset-setup-back-btn" type="button" class="text-action hidden">← Назад</button>
+        </div>
+        <p class="hint setup-lead">
+          Укажите пути к <strong>llama-server</strong> и модели. Пресет сохранится в
+          <code>jarvis_config.json</code> на этом компьютере.
+        </p>
+        <form id="preset-setup-form" class="preset-form">
+          <label class="label" for="preset-name-input">Название пресета</label>
+          <input id="preset-name-input" class="text-input" type="text" placeholder="Например, Qwen Fast">
+
+          <label class="label" for="preset-llama-input">Путь к llama-server.exe</label>
+          <input id="preset-llama-input" class="text-input" type="text" placeholder="C:\llama_server\llama-server.exe" required>
+          <p class="hint">Нужен именно <strong>llama-server.exe</strong>, не llama.exe (это другая программа).</p>
+
+          <label class="label" for="preset-model-input">Путь к модели (.gguf)</label>
+          <input id="preset-model-input" class="text-input" type="text" placeholder="C:\models\qwen.gguf" required>
+
+          <label class="label" for="preset-mmproj-input">Путь к mmproj (.gguf), опционально</label>
+          <input id="preset-mmproj-input" class="text-input" type="text" placeholder="Оставьте пустым для текстовой модели">
+
+          <label class="label" for="preset-mtp-input">Путь к MTP (.gguf), опционально</label>
+          <input id="preset-mtp-input" class="text-input" type="text" placeholder="Оставьте пустым, если не используется">
+          <div class="preset-form-grid">
+            <div>
+              <label class="label" for="preset-context-input">Контекст</label>
+              <input id="preset-context-input" class="text-input" type="number" min="1024" step="1024" value="18432">
+            </div>
+            <div>
+              <label class="label" for="preset-ngl-input">GPU слои (-ngl)</label>
+              <input id="preset-ngl-input" class="text-input" type="number" min="0" step="1" value="99">
+            </div>
+            <div>
+              <label class="label" for="preset-port-input">Порт</label>
+              <input id="preset-port-input" class="text-input" type="number" min="1" step="1" value="8080">
+            </div>
+          </div>
+
+          <p class="hint" id="preset-setup-hint">
+            Скачать llama-server: github.com/ggerganov/llama.cpp/releases
+          </p>
+          <p class="form-error hidden" id="preset-setup-error"></p>
+          <button id="preset-save-btn" type="submit" class="primary">Сохранить пресет</button>
+        </form>
+      </section>
+
+      <section id="preset-launch-panel" class="loading-panel glow hidden">
+        <div class="panel-title">Запуск модели</div>
+        <div id="preset-card-list" class="preset-card-list"></div>
+        <label class="label" for="loading-model-select">Или выберите из списка</label>
+        <select id="loading-model-select"></select>
+        <p class="hint" id="loading-model-description"></p>
+        <label class="label" for="loading-asr-select">Потоковая расшифровка</label>
+        <select id="loading-asr-select"></select>
+        <p class="hint" id="loading-asr-description"></p>
+        <div class="loading-actions">
+          <button id="loading-start-btn" class="primary">Запустить llama-server</button>
+          <button id="preset-add-btn" type="button" class="ghost">+ Новый пресет</button>
+        </div>
+      </section>
+      
+      <div class="loading-status">
+        <span class="spinner" aria-hidden="true"></span>
+        <span id="loading-status-text">Ожидание запуска...</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="shell hidden">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">▼</div>
+        <div class="brand-copy">
+          <div class="brand-kicker">Local Agent</div>
+          <h1>Jarvis CLI</h1>
+        </div>
+      </div>
+
+      <section class="panel accent chats-panel">
+        <div class="panel-title-row">
+          <div class="panel-title">Чаты</div>
+          <button id="new-chat-btn" class="icon-action" type="button" aria-label="Новый чат">＋</button>
+        </div>
+        <div id="chat-list-empty" class="chats-empty hidden">Чатов пока нет</div>
+        <div id="chat-list" class="chat-list"></div>
+      </section>
+    </aside>
+
+    <main class="workspace">
+      <header class="hero">
+        <div class="hero-copy">
+          <div class="hero-kicker">Local Agent</div>
+          <div id="hero-chat-title" class="hero-chat-title">Новый чат</div>
+        </div>
+        <div class="hero-actions">
+          <button id="settings-toggle-btn" class="icon-action gear-action" type="button" aria-label="Настройки">⚙</button>
+          <div class="hero-badge" id="hero-badge">offline</div>
+        </div>
+      </header>
+
+      <section class="chat-frame">
+        <div id="chat-log" class="chat-log"></div>
+        <form id="chat-form" class="composer">
+          <textarea id="message-input" placeholder="Напиши задачу для Jarvis..." rows="3"></textarea>
+          <div id="paste-preview" class="paste-preview is-empty"></div>
+          <div class="composer-bar">
+            <div class="composer-left">
+              <div id="live-status" class="live-status is-idle">
+                <span class="spinner" aria-hidden="true"></span>
+                <span id="live-status-text">Готов к работе</span>
+                <span id="live-status-timer" class="live-status-timer hidden">0.0s</span>
+              </div>
+            </div>
+            <div class="composer-actions">
+              <div
+                id="context-indicator"
+                class="context-indicator"
+                title="Контекст пока не рассчитан"
+                aria-label="Индикатор заполнения контекста"
+              >
+                <span id="context-indicator-text" class="context-indicator-text">ctx</span>
+              </div>
+              <button id="send-btn" type="submit" class="primary send-btn-icon" aria-label="Отправить">
+                <span class="send-btn-arrow" aria-hidden="true">➜</span>
+              </button>
+            </div>
+          </div>
+        </form>
+      </section>
+    </main>
+  </div>
+
+  <div id="settings-backdrop" class="settings-backdrop hidden"></div>
+  <aside id="settings-drawer" class="settings-drawer hidden" aria-hidden="true">
+    <div class="settings-drawer-header">
+      <div>
+        <div class="hero-kicker">Control Panel</div>
+        <div class="panel-title">Настройки</div>
+      </div>
+      <button id="settings-close-btn" class="icon-action" type="button" aria-label="Закрыть настройки">×</button>
+    </div>
+
+    <section class="panel accent settings-panel">
+      <div class="panel-title">Голос</div>
+      <label class="toggle-row" for="tts-toggle">
+        <span>
+          <strong class="toggle-title">Озвучка</strong>
+          <span class="toggle-hint" id="tts-toggle-hint">Голосовой вывод Jarvis через OmniVoice</span>
+        </span>
+        <span class="toggle-switch">
+          <input id="tts-toggle" type="checkbox">
+          <span class="toggle-slider"></span>
+        </span>
+      </label>
+      <label class="toggle-row" for="voice-toggle">
+        <span>
+          <strong class="toggle-title">Голосовая активация</strong>
+          <span class="toggle-hint" id="voice-toggle-hint">Wake word: "пятница"</span>
+        </span>
+        <span class="toggle-switch">
+          <input id="voice-toggle" type="checkbox">
+          <span class="toggle-slider"></span>
+        </span>
+      </label>
+      <label class="label" for="voice-asr-select">Backend расшифровки</label>
+      <select id="voice-asr-select"></select>
+      <p class="hint" id="voice-asr-description">Выберите движок потоковой расшифровки после wake word.</p>
+    </section>
+
+    <section class="panel accent settings-panel">
+      <div class="panel-title">Telegram-аккаунт</div>
+      <p class="hint" id="telegram-account-hint">Управление личным Telegram-аккаунтом через Telethon.</p>
+      <div id="telegram-account-status" class="telegram-account-status">Загрузка статуса...</div>
+      <div class="telegram-account-actions">
+        <button id="telegram-account-setup-btn" type="button" class="primary">Подключить Telegram</button>
+        <button id="telegram-account-disconnect-btn" type="button" class="ghost hidden">Отключить</button>
+      </div>
+    </section>
+
+    <section class="panel accent settings-panel">
+      <div class="panel-title">Инструменты модели</div>
+      <p class="hint" id="tools-hint">Здесь можно включить или отключить инструменты для активного пресета.</p>
+      <div id="tools-list" class="tools-list"></div>
+    </section>
+  </aside>
+
+  <div id="voice-overlay" class="voice-overlay hidden" aria-hidden="true">
+    <div class="voice-card">
+      <div class="voice-kicker">Голосовой режим</div>
+      <div id="voice-overlay-status" class="voice-overlay-status">Слушаю команду...</div>
+      <div id="voice-overlay-transcript" class="voice-overlay-transcript">...</div>
+      <div class="voice-overlay-hint">Скажите "пятница", затем продиктуйте запрос. После паузы он отправится автоматически.</div>
+    </div>
+  </div>
+
+  <!-- Модальное окно ask_user -->
+  <div id="user-prompt-modal" class="user-prompt-modal hidden" aria-hidden="true">
+    <div class="user-prompt-backdrop"></div>
+    <div class="user-prompt-card glow">
+      <div class="user-prompt-kicker">Требуется ваш ответ</div>
+      <div id="user-prompt-question" class="user-prompt-question">Вопрос агента...</div>
+      <textarea id="user-prompt-input" class="user-prompt-input" rows="3" placeholder="Введите ответ..."></textarea>
+      <div class="user-prompt-actions">
+        <button id="user-prompt-cancel-btn" type="button" class="ghost">Отмена</button>
+        <button id="user-prompt-submit-btn" type="button" class="primary">Ответить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Модальное окно настройки Telegram-аккаунта -->
+  <div id="telegram-setup-modal" class="telegram-setup-modal hidden" aria-hidden="true">
+    <div class="telegram-setup-backdrop"></div>
+    <div class="telegram-setup-card glow">
+      <div class="panel-title-row">
+        <div class="panel-title">Подключение Telegram</div>
+        <button id="telegram-setup-close-btn" type="button" class="icon-action" aria-label="Закрыть">×</button>
+      </div>
+
+      <div id="telegram-setup-step-credentials" class="telegram-setup-step">
+        <p class="hint">Введите данные из <a href="https://my.telegram.org/apps" target="_blank" rel="noopener">my.telegram.org/apps</a>.</p>
+        <form id="telegram-setup-form" class="telegram-setup-form">
+          <label class="label" for="telegram-api-id">API ID</label>
+          <input id="telegram-api-id" class="text-input" type="number" placeholder="12345" required>
+
+          <label class="label" for="telegram-api-hash">API Hash</label>
+          <input id="telegram-api-hash" class="text-input" type="text" placeholder="abcdef..." required>
+
+          <label class="label" for="telegram-phone">Номер телефона</label>
+          <input id="telegram-phone" class="text-input" type="tel" placeholder="+79001234567" required>
+
+          <p class="form-error hidden" id="telegram-setup-error"></p>
+          <button id="telegram-send-code-btn" type="submit" class="primary">Отправить код</button>
+        </form>
+      </div>
+
+      <div id="telegram-setup-step-code" class="telegram-setup-step hidden">
+        <p class="hint">Введите код подтверждения, полученный в Telegram.</p>
+        <form id="telegram-code-form" class="telegram-setup-form">
+          <label class="label" for="telegram-code">Код подтверждения</label>
+          <input id="telegram-code" class="text-input" type="text" placeholder="12345" required>
+
+          <p class="form-error hidden" id="telegram-code-error"></p>
+          <button id="telegram-confirm-code-btn" type="submit" class="primary">Подтвердить</button>
+        </form>
+      </div>
+
+      <div id="telegram-setup-step-2fa" class="telegram-setup-step hidden">
+        <p class="hint">У вас включена двухфакторная аутентификация. Введите пароль.</p>
+        <form id="telegram-2fa-form" class="telegram-setup-form">
+          <label class="label" for="telegram-2fa-password">Пароль 2FA</label>
+          <input id="telegram-2fa-password" class="text-input" type="password" placeholder="Пароль" required>
+
+          <p class="form-error hidden" id="telegram-2fa-error"></p>
+          <button id="telegram-confirm-2fa-btn" type="submit" class="primary">Подтвердить</button>
+        </form>
+      </div>
+
+      <div id="telegram-setup-step-success" class="telegram-setup-step hidden">
+        <p class="hint" id="telegram-setup-success-text">Аккаунт подключён.</p>
+        <button id="telegram-setup-finish-btn" type="button" class="primary">Готово</button>
+      </div>
+    </div>
+  </div>
+
+  <template id="message-template">
+    <article class="message">
+      <div class="message-role"></div>
+      <div class="message-body"></div>
+    </article>
+  </template>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="/static/app.js?v=16"></script>
+</body>
+</html>

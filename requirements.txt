@@ -1,0 +1,35 @@
+# --- Web/Desktop ---
+fastapi
+uvicorn[standard]
+requests
+pywebview
+
+# --- Data / Images ---
+Pillow
+
+# --- NLP (опционально, для заголовков чатов) ---
+spacy
+pytextrank
+
+# --- OCR + UI Automation ---
+easyocr
+pywinauto
+
+# --- Voice ---
+vosk
+sounddevice
+librosa
+torch
+silero
+
+# --- TTS ---
+numpy
+supertonic
+
+# --- Telegram ---
+pyTelegramBotAPI
+telethon
+
+# --- Utils ---
+fuzzywuzzy
+python-Levenshtein
