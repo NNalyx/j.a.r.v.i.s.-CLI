@@ -14,18 +14,18 @@ def ask_user(question: str, timeout: float = 120.0) -> ToolResult:
         try:
             answer = handler(question, float(timeout))
             if answer is None:
-                return ToolResult(False, None, "Пользователь не ответил или отменил запрос.")
+                return ToolResult(False, None, "User did not answer or cancelled the request.")
             if answer == "__cancelled__":
-                return ToolResult(False, None, "Пользователь отменил запрос.")
+                return ToolResult(False, None, "User cancelled the request.")
             return ToolResult(True, {"answer": answer})
         except Exception as exc:
-            return ToolResult(False, None, f"Ошибка при ожидании ответа пользователя: {exc}")
+            return ToolResult(False, None, f"Error waiting for user answer: {exc}")
 
     # Fallback to console input when no web handler is registered.
     try:
         answer = input(f"{question} ")
         return ToolResult(True, {"answer": answer})
     except EOFError:
-        return ToolResult(False, None, "Не удалось получить ответ пользователя (EOF).")
+        return ToolResult(False, None, "Failed to get user answer (EOF).")
     except Exception as exc:
-        return ToolResult(False, None, f"Ошибка ввода: {exc}")
+        return ToolResult(False, None, f"Input error: {exc}")

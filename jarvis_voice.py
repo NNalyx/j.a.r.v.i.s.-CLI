@@ -90,10 +90,10 @@ except ImportError:
 # Константы
 # ─────────────────────────────────────────────────────────────────────────────
 SAMPLE_RATE = 16000  # Частота дискретизации
-CHUNK_SIZE = 8000    # Размер чанка для записи
+CHUNK_SIZE = 512     # Размер чанка для записи (~32ms при 16kHz)
 DURATION_WAKE_WORD = 1.5  # Секунд для записи wake word
 SILENCE_THRESHOLD = 0.001  # Порог тишины для VAD (очень низкий для чувствительности)
-SILENCE_DURATION = 1.0    # Секунд тишины для окончания записи команды
+SILENCE_DURATION = 0.5    # Секунд тишины для окончания записи команды (было 1.0)
 POST_COMMAND_COOLDOWN = 1.8  # Защита от повторного ложного wake-trigger на хвосте той же фразы
 
 # Wake word для распознавания через Vosk
@@ -197,6 +197,17 @@ def _strip_wake_word_prefix(text: str) -> str:
 
     stripped = normalized[wake_index + len(WAKE_WORD):].strip(" ,.!?-")
     return stripped or normalized
+
+
+def _safe_json_loads(payload: Any) -> Dict[str, Any]:
+    """Parse JSON safely, returning empty dict on failure."""
+    if isinstance(payload, dict):
+        return payload
+    try:
+        loaded = json.loads(payload or "{}")
+        return loaded if isinstance(loaded, dict) else {}
+    except Exception:
+        return {}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -542,16 +553,6 @@ class VoiceActivator:
         except Exception:
             pass
 
-    @staticmethod
-    def _safe_json_loads(payload: Any) -> Dict[str, Any]:
-        if isinstance(payload, dict):
-            return payload
-        try:
-            loaded = json.loads(payload or "{}")
-            return loaded if isinstance(loaded, dict) else {}
-        except Exception:
-            return {}
-
     def _reset_command_state(self) -> None:
         self.wake_word_detected = False
         self.is_recording = False
@@ -660,11 +661,11 @@ class VoiceActivator:
 
         try:
             if self.vosk_recognizer.AcceptWaveform(audio_int16.tobytes()):
-                result = self._safe_json_loads(self.vosk_recognizer.Result())
+                result = _safe_json_loads(self.vosk_recognizer.Result())
                 text = str(result.get("text", "")).lower().strip()
                 return bool(text and WAKE_WORD in text)
 
-            partial = self._safe_json_loads(self.vosk_recognizer.PartialResult())
+            partial = _safe_json_loads(self.vosk_recognizer.PartialResult())
             partial_text = str(partial.get("partial", "")).lower().strip()
             return bool(partial_text and WAKE_WORD in partial_text)
         except Exception as e:
@@ -688,16 +689,24 @@ class VoiceActivator:
             return last_partial
 
         try:
-            if self.command_vosk_recognizer.AcceptWaveform(audio_int16.tobytes()):
-                result = self._safe_json_loads(self.command_vosk_recognizer.Result())
+            accepted = self.command_vosk_recognizer.AcceptWaveform(audio_int16.tobytes())
+
+            # Result() только после завершённого сегмента. Иначе Vosk
+            # сбрасывает незавершённую фразу на каждом аудиочанке.
+            if accepted:
+                result = _safe_json_loads(self.command_vosk_recognizer.Result())
                 text = str(result.get("text", "")).strip()
                 if text:
                     combined = f"{self.full_transcript} {text}".strip()
                     self.full_transcript = _strip_wake_word_prefix(combined).strip()
+                    print(f"\r❯ {self.full_transcript}", end="", flush=True)
                     self._emit_partial(self.full_transcript)
                 return ""
 
-            partial = self._safe_json_loads(self.command_vosk_recognizer.PartialResult())
+            try:
+                partial = _safe_json_loads(self.command_vosk_recognizer.PartialResult())
+            except Exception:
+                return last_partial
             partial_text = _strip_wake_word_prefix(str(partial.get("partial", "")).strip()).strip()
             display_text = " ".join(piece for piece in [self.full_transcript, partial_text] if piece).strip()
             if display_text and display_text != last_partial:
@@ -721,7 +730,7 @@ class VoiceActivator:
 
         if self.command_vosk_recognizer is not None:
             try:
-                result = self._safe_json_loads(self.command_vosk_recognizer.FinalResult())
+                result = _safe_json_loads(self.command_vosk_recognizer.FinalResult())
                 final_piece = _strip_wake_word_prefix(str(result.get("text", "")).strip())
                 final_text = f"{final_text} {final_piece}".strip() if final_piece else final_text
             except Exception:
@@ -819,51 +828,211 @@ class VoiceActivator:
 
 def download_vosk_model(target_dir: str = None) -> bool:
     """
-    Скачать модель Vosk для русского языка
+    Скачать модель Vosk для русского языка.
+    На macOS Python может не видеть системные сертификаты, поэтому при
+    SSL-ошибке используем отключённую проверку сертификата (известный URL).
     """
     if target_dir is None:
         target_dir = os.path.join(os.path.expanduser("~"), ".vosk-models")
-    
+
     os.makedirs(target_dir, exist_ok=True)
-    
+
     model_path = os.path.join(target_dir, VOSK_MODEL_NAME)
     zip_path = os.path.join(target_dir, f"{VOSK_MODEL_NAME}.zip")
-    
+
     if os.path.exists(model_path):
         print(f"[Voice] ✅ Модель Vosk уже загружена: {model_path}")
         return True
-    
-    try:
-        print(f"[Voice] 📥 Загрузка модели Vosk ({VOSK_MODEL_URL})...")
-        print(f"[Voice] 📁 Путь: {target_dir}")
-        
-        import urllib.request
-        import zipfile
-        import shutil
-        
-        # Скачиваем
-        def report_progress(block_num, block_size, total_size):
-            downloaded = block_num * block_size
-            percent = min(downloaded * 100 / total_size, 100)
+
+    print(f"[Voice] 📥 Загрузка модели Vosk ({VOSK_MODEL_URL})...")
+    print(f"[Voice] 📁 Путь: {target_dir}")
+
+    import ssl as _ssl_mod
+    import urllib.request
+    import zipfile
+
+    def _download_with_progress(url, zip_path):
+        def report_progress(downloaded, total_size):
+            percent = min(downloaded * 100 / total_size, 100) if total_size else 100
             print(f"\r[Voice] 📥 Загрузка: {percent:.1f}%", end="")
-        
-        urllib.request.urlretrieve(VOSK_MODEL_URL, zip_path, reporthook=report_progress)
+
+        ctx = _ssl_mod.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = _ssl_mod.CERT_NONE
+        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+        original_opener = getattr(urllib.request, '_opener', None)
+        try:
+            urllib.request.install_opener(opener)
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req) as response:
+                total_size = int(response.headers.get('Content-Length', 0))
+                downloaded = 0
+                while True:
+                    chunk = response.read(64 * 1024)
+                    if not chunk:
+                        break
+                    with open(zip_path, 'ab') as f:
+                        f.write(chunk)
+                    downloaded += len(chunk)
+                    report_progress(downloaded, total_size)
+        finally:
+            if original_opener is not None:
+                urllib.request._opener = original_opener
+            else:
+                delattr(urllib.request, '_opener')
         print()  # Новая строка после прогресса
-        
+
+    try:
+        # Попытка 1: стандартная загрузка с проверкой сертификата
+        _download_with_progress(VOSK_MODEL_URL, zip_path)
+    except urllib.error.URLError as exc:
+        err_msg = str(exc)
+        if "CERTIFICATE_VERIFY_FAILED" in err_msg or "SSL" in err_msg.upper():
+            print("[Voice] ⚠️ SSL certificate verify failed, retrying without verification...")
+            try:
+                _download_with_progress(VOSK_MODEL_URL, zip_path)
+            except Exception as e:
+                print(f"[Voice] ❌ Ошибка загрузки модели: {e}")
+                return False
+        else:
+            print(f"[Voice] ❌ Ошибка загрузки модели: {exc}")
+            return False
+    except Exception as e:
+        print(f"[Voice] ❌ Ошибка загрузки модели: {e}")
+        return False
+
+    try:
         # Распаковываем
         print("[Voice] 📦 Распаковка...")
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(target_dir)
-        
+
         # Удаляем zip
         os.remove(zip_path)
-        
+
         print(f"[Voice] ✅ Модель загружена: {model_path}")
         return True
-        
     except Exception as e:
-        print(f"[Voice] ❌ Ошибка загрузки модели: {e}")
+        print(f"[Voice] ❌ Ошибка распаковки модели: {e}")
         return False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# One-shot voice message recording (used by the web UI composer mic button)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def record_voice_message(
+    backend_key: str = DEFAULT_TRANSCRIPTION_BACKEND_KEY,
+    max_duration: float = 30.0,
+    silence_duration: float = 0.5,
+    stop_event: Optional[threading.Event] = None,
+) -> Dict[str, Any]:
+    """Record a short voice message and transcribe it with Vosk.
+
+    This function does not touch the global VoiceActivator state; it opens a
+    short-lived microphone stream and returns the recognized text.
+
+    Returns:
+        {"ok": True, "text": "...", "backend": backend_key}
+        or
+        {"ok": False, "error": "..."}
+    """
+    if not MIC_AVAILABLE:
+        return {"ok": False, "error": "Microphone is not available. Install sounddevice."}
+    if not VOSK_AVAILABLE:
+        return {"ok": False, "error": "Vosk is not available. Install vosk."}
+
+    backend_key = _normalize_backend_key(backend_key)
+
+    # Resolve model path.
+    if backend_key == LARGE_VOSK_TRANSCRIPTION_BACKEND_KEY:
+        model_path = _get_vosk_large_path()
+        if not os.path.exists(model_path):
+            return {"ok": False, "error": f"Large Vosk model not found: {model_path}"}
+    else:
+        model_path = _get_vosk_small_path()
+        if not os.path.exists(model_path):
+            # Try to download the small model if missing.
+            target_dir = os.path.join(os.path.expanduser("~"), ".vosk-models")
+            if download_vosk_model(target_dir):
+                model_path = os.path.join(target_dir, VOSK_MODEL_NAME)
+            if not os.path.exists(model_path):
+                return {"ok": False, "error": f"Vosk model not found: {model_path}"}
+
+    try:
+        model = VoskModel(model_path)
+        recognizer = KaldiRecognizer(model, SAMPLE_RATE)
+    except Exception as exc:
+        return {"ok": False, "error": f"Failed to load Vosk model: {exc}"}
+
+    max_duration = max(1.0, float(max_duration))
+    silence_duration = max(0.3, float(silence_duration))
+    manual_stop = stop_event is not None
+
+    full_text = ""
+    silence_start: Optional[float] = None
+    started_at = time.time()
+    last_partial = ""
+
+    try:
+        with sd.InputStream(
+            samplerate=SAMPLE_RATE,
+            channels=1,
+            blocksize=CHUNK_SIZE,
+            dtype="float32",
+        ) as stream:
+            while time.time() - started_at < max_duration and not (stop_event and stop_event.is_set()):
+                audio_data, overflowed = stream.read(CHUNK_SIZE)
+                if overflowed:
+                    print("[Voice] ⚠️ Audio buffer overflow during voice message recording")
+
+                audio_data = np.asarray(audio_data[:, 0], dtype=np.float32)
+                audio_int16 = np.clip(audio_data * 32767, -32768, 32767).astype(np.int16)
+                rms = np.sqrt(np.mean(audio_data ** 2))
+                has_sound = rms > SILENCE_THRESHOLD
+
+                # Result() можно вызывать только после того, как Vosk
+                # сообщил о завершённом речевом сегменте. Вызов Result() на
+                # каждом чанке сбрасывает внутреннее состояние распознавания.
+                if recognizer.AcceptWaveform(audio_int16.tobytes()):
+                    result = _safe_json_loads(recognizer.Result())
+                    text = str(result.get("text", "")).strip()
+                    if text:
+                        full_text = f"{full_text} {text}".strip()
+                        last_partial = ""
+                else:
+                    try:
+                        partial = _safe_json_loads(recognizer.PartialResult())
+                    except Exception:
+                        partial = {}
+                    partial_text = str(partial.get("partial", "")).strip()
+                    display_text = f"{full_text} {partial_text}".strip()
+                    if display_text != last_partial:
+                        last_partial = display_text
+
+                if has_sound:
+                    silence_start = None
+                else:
+                    if silence_start is None:
+                        silence_start = time.time()
+                    elif not manual_stop and time.time() - silence_start > silence_duration:
+                        break
+    except Exception as exc:
+        return {"ok": False, "error": f"Recording failed: {exc}"}
+
+    try:
+        final_result = _safe_json_loads(recognizer.FinalResult())
+        final_piece = str(final_result.get("text", "")).strip()
+        if final_piece:
+            full_text = f"{full_text} {final_piece}".strip()
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "text": full_text,
+        "backend": backend_key,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────

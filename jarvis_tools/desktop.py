@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 
 from app_launcher import launch_app_fuzzy
 from jarvis_core.types import ToolResult
+from .utils import _hotkey_platform, _type_text_platform
 
 
 def take_screenshot(region: Optional[Dict[str, int]] = None, max_width: int = 1920,
@@ -27,9 +28,43 @@ def take_screenshot(region: Optional[Dict[str, int]] = None, max_width: int = 19
             )
             offset_x = int(region.get("x", 0) or 0)
             offset_y = int(region.get("y", 0) or 0)
-            screenshot = ImageGrab.grab(bbox=bbox)
+            try:
+                screenshot = ImageGrab.grab(bbox=bbox)
+            except Exception:
+                from .utils import _take_region_screenshot
+                path, meta, screenshot = _take_region_screenshot(
+                    region=region, max_width=max_width, max_height=max_height
+                )
+                return ToolResult(True, {
+                    "path": path,
+                    "width": screenshot.width,
+                    "height": screenshot.height,
+                    "scale_factor": meta.get("scale_factor", 1.0),
+                    "orig_width": meta.get("orig_width", screenshot.width),
+                    "orig_height": meta.get("orig_height", screenshot.height),
+                    "offset_x": meta.get("offset_x", 0),
+                    "offset_y": meta.get("offset_y", 0),
+                    "message": f"Скриншот сохранён: {path} ({screenshot.width}x{screenshot.height})",
+                })
         else:
-            screenshot = ImageGrab.grab()
+            try:
+                screenshot = ImageGrab.grab()
+            except Exception:
+                from .utils import _take_region_screenshot
+                path, meta, screenshot = _take_region_screenshot(
+                    region=None, max_width=max_width, max_height=max_height
+                )
+                return ToolResult(True, {
+                    "path": path,
+                    "width": screenshot.width,
+                    "height": screenshot.height,
+                    "scale_factor": meta.get("scale_factor", 1.0),
+                    "orig_width": meta.get("orig_width", screenshot.width),
+                    "orig_height": meta.get("orig_height", screenshot.height),
+                    "offset_x": 0,
+                    "offset_y": 0,
+                    "message": f"Скриншот сохранён: {path} ({screenshot.width}x{screenshot.height})",
+                })
 
         # Масштабирование если разрешение больше целевого
         orig_width, orig_height = screenshot.size
@@ -93,7 +128,7 @@ def type_text(text: str, interval: float = 0.05) -> ToolResult:
     """Напечатать текст с клавиатуры"""
     try:
         import pyautogui
-        pyautogui.write(text, interval=interval)
+        _type_text_platform(text, pyautogui)
         return ToolResult(True, {"text": text[:100], "message": f"Text typed ({len(text)} chars)"})
     except ImportError:
         return ToolResult(False, None, "pyautogui not installed. Run: pip install pyautogui")
@@ -126,7 +161,7 @@ def hotkey(keys: List[str]) -> ToolResult:
     """Нажать комбинацию клавиш (hotkey)"""
     try:
         import pyautogui
-        pyautogui.hotkey(*keys)
+        _hotkey_platform(keys, pyautogui)
         return ToolResult(True, {"keys": keys, "message": f"Hotkey {'+'.join(keys)} pressed"})
     except ImportError:
         return ToolResult(False, None, "pyautogui not installed. Run: pip install pyautogui")
@@ -152,4 +187,3 @@ def launch_app(app_name: str) -> ToolResult:
                               f"App '{app_name}' not found. Try a different name or use run_cmd.")
     except Exception as e:
         return ToolResult(False, None, f"Launch error: {str(e)}")
-

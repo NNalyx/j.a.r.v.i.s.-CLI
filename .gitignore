@@ -51,6 +51,12 @@ jarvis_voice_profile.json
 tts_output.wav
 llama_server.log
 *.log
+app.pid
+app_launcher_cache.json
+cookies.txt
+jarvis_logs/
+jarvis_agent_images/
+\!
 
 # Models / binaries (user provides these)
 *.gguf

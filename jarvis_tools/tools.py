@@ -16,7 +16,6 @@ from .files import (
     list_directory,
     list_file,
     read_code,
-    read_file,
     search_text_in_file,
     write_file,
 )
@@ -46,7 +45,6 @@ class Tools:
     read_url = staticmethod(read_url)
     run_cmd = staticmethod(run_cmd)
     run_python = staticmethod(run_python)
-    read_file = staticmethod(read_file)
     search_text_in_file = staticmethod(search_text_in_file)
     write_file = staticmethod(write_file)
     list_directory = staticmethod(list_directory)

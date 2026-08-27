@@ -6,6 +6,13 @@ from typing import Callable, Optional
 # Устанавливается jarvis_web_desktop.py при старте веб-сервера.
 user_prompt_handler: Optional[Callable[[str, float], Optional[str]]] = None
 
+# Handler для прогресса генерации изображений: (tool_call_id, percent) -> None.
+# Устанавливается jarvis_web_desktop.py внутри активного chat stream.
+image_progress_handler: Optional[Callable[[str, int], None]] = None
+
+# ID активного вызова инструмента, используется для привязки прогресса к UI placeholder.
+current_tool_call_id: Optional[str] = None
+
 _tts_model = None
 _tts_device = None
 _tts_voice_style = None

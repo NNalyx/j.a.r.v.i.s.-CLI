@@ -1,4 +1,5 @@
 """UI Automation context and action tools."""
+import sys
 from typing import Optional
 
 from jarvis_core.colors import Colors
@@ -10,6 +11,7 @@ from .utils import (
     _extract_ocr_elements_from_screenshot,
     _find_best_uia_element,
     _find_best_visual_route,
+    _type_text_platform,
     _looks_like_web_app_context,
     _store_app_context,
     _summarize_app_context,
@@ -30,7 +32,7 @@ def get_app_context(refresh: bool = False, max_elements: int = 300) -> ToolResul
 
         ocr_text_elements = []
         visual_routes = []
-        fallback_mode = "uia"
+        fallback_mode = "macos-accessibility" if sys.platform == "darwin" else "uia"
         screenshot_path = None
         screenshot_meta = None
         if _looks_like_web_app_context(context):
@@ -53,11 +55,24 @@ def get_app_context(refresh: bool = False, max_elements: int = 300) -> ToolResul
                         screenshot_path,
                         screenshot_meta,
                         ocr_text_elements,
+                        text_action="click" if sys.platform == "darwin" else "focus",
                     )
                     if visual_routes:
                         fallback_mode = "uia+visual_map"
                 except Exception as ocr_error:
                     print(f"{Colors.YELLOW}[AppContext] OCR fallback failed: {ocr_error}{Colors.RESET}")
+            elif sys.platform == "darwin":
+                try:
+                    screenshot_path, screenshot_meta, _ = _take_region_screenshot(region=None, max_width=1600, max_height=1000)
+                    ocr_text_elements = _extract_ocr_elements_from_screenshot(
+                        screenshot_path, screenshot_meta=screenshot_meta, max_results=40
+                    )
+                    visual_routes = _build_visual_routes_from_observations(
+                        screenshot_path, screenshot_meta, ocr_text_elements, text_action="click"
+                    )
+                    fallback_mode = "macos+visual_map"
+                except Exception as ocr_error:
+                    print(f"{Colors.YELLOW}[AppContext] macOS OCR fallback failed: {ocr_error}{Colors.RESET}")
 
         context["ocr_text_elements"] = ocr_text_elements
         context["visual_routes"] = visual_routes
@@ -114,7 +129,19 @@ def do_action_in_app(target: str, action: str = "click", text: Optional[str] = N
                     ocr_elements,
                 )
                 context["visual_routes"] = visual_routes
-                best_route, route_candidates = _find_best_visual_route(target, action_norm, visual_routes)
+                route_action = "click" if sys.platform == "darwin" else action_norm
+                best_route, route_candidates = _find_best_visual_route(target, route_action, visual_routes)
+            elif sys.platform == "darwin":
+                screenshot_path, screenshot_meta, _ = _take_region_screenshot(region=None, max_width=1600, max_height=1000)
+                ocr_elements = _extract_ocr_elements_from_screenshot(
+                    screenshot_path, screenshot_meta=screenshot_meta, max_results=40
+                )
+                visual_routes = _build_visual_routes_from_observations(
+                    screenshot_path, screenshot_meta, ocr_elements, text_action="click"
+                )
+                context["ocr_text_elements"] = ocr_elements
+                context["visual_routes"] = visual_routes
+                best_route, route_candidates = _find_best_visual_route(target, "click", visual_routes)
 
         if not best_element and not best_route:
             return ToolResult(
@@ -170,7 +197,7 @@ def do_action_in_app(target: str, action: str = "click", text: Optional[str] = N
             pyautogui.click(x=click_x, y=click_y)
         elif action_norm == "type":
             pyautogui.click(x=click_x, y=click_y)
-            pyautogui.write(text or "", interval=0.03)
+            _type_text_platform(text or "", pyautogui)
 
         refreshed_context = _uia_scan_active_window(max_elements=300)
         refreshed_summary = _summarize_app_context(refreshed_context)
@@ -202,4 +229,3 @@ def do_action_in_app(target: str, action: str = "click", text: Optional[str] = N
         return ToolResult(False, None, f"Import error: {str(e)}")
     except Exception as e:
         return ToolResult(False, None, f"Do action in app error: {str(e)}")
-

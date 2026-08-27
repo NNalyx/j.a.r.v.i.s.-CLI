@@ -6,8 +6,11 @@ import json
 import os
 import re
 import requests
+import subprocess
+import sys
 import tempfile
 import time
+from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 
@@ -48,11 +51,64 @@ def _uia_rect_to_dict(rect: Any) -> Dict[str, int]:
     }
 
 def _uia_get_active_window():
+    if sys.platform == "darwin":
+        app_script = 'tell application "System Events" to get name of first application process whose frontmost is true'
+        try:
+            app_result = subprocess.run(
+                ["osascript", "-e", app_script],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise RuntimeError(f"Could not detect the active macOS application: {error}") from error
+        if app_result.returncode != 0:
+            detail = app_result.stderr.strip() or "unknown error"
+            raise RuntimeError(f"Could not detect the active macOS application: {detail}")
+
+        app_name = _uia_normalize_text(app_result.stdout.strip()) or "macOS"
+        script = '''
+tell application "System Events"
+    set frontApp to first application process whose frontmost is true
+    set frontWindow to front window of frontApp
+    set windowPosition to position of frontWindow
+    set windowSize to size of frontWindow
+    return (name of frontApp) & tab & (name of frontWindow) & tab & ¬
+        (unix id of frontApp) & tab & (item 1 of windowPosition) & tab & ¬
+        (item 2 of windowPosition) & tab & (item 1 of windowSize) & tab & ¬
+        (item 2 of windowSize)
+end tell
+'''
+        try:
+            result = subprocess.run(
+                ["osascript", "-e", script],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            result = None
+
+        parts = result.stdout.strip().split("\t") if result and result.returncode == 0 else []
+        if len(parts) >= 7:
+            _, title, process_id, left, top, width, height = parts[:7]
+        else:
+            # Без Accessibility точные границы недоступны, но OCR по всему
+            # экрану всё равно позволяет выполнять базовые GUI-действия.
+            title, process_id, left, top, width, height = app_name, "0", "0", "0", "0", "0"
+        rect = {
+            "left": int(float(left)), "top": int(float(top)),
+            "width": max(0, int(float(width))), "height": max(0, int(float(height))),
+        }
+        rect["right"] = rect["left"] + rect["width"]
+        rect["bottom"] = rect["top"] + rect["height"]
+        return {"window": None, "handle": int(process_id), "title": _uia_normalize_text(title), "app_name": app_name, "bounds": rect}
+
     if not UI_AUTOMATION_AVAILABLE or Desktop is None:
         raise RuntimeError("pywinauto is not installed. Install it with: pip install pywinauto")
 
     if os.name != "nt":
-        raise RuntimeError("UI Automation tools are supported only on Windows")
+        raise RuntimeError("UI Automation tools are supported on Windows and macOS")
 
     ctypes = __import__("ctypes")
     handle = int(ctypes.windll.user32.GetForegroundWindow() or 0)
@@ -108,7 +164,29 @@ def _uia_element_identity(element_payload: Dict[str, Any]) -> str:
     return " | ".join(part for part in parts if part).strip()
 
 def _uia_scan_active_window(max_elements: int = 120) -> Dict[str, Any]:
-    window, handle = _uia_get_active_window()
+    active = _uia_get_active_window()
+    if sys.platform == "darwin":
+        title = active["title"]
+        app_name = active["app_name"]
+        process_id = active["handle"]
+        app_key = hashlib.sha1(f"{app_name}|{title}".encode("utf-8", errors="ignore")).hexdigest()[:16]
+        return {
+            "app_key": app_key,
+            "window_handle": process_id,
+            "process_id": process_id,
+            "process_name": app_name,
+            "title": title,
+            "control_type": "Window",
+            "class_name": "macos-accessibility",
+            "platform": "darwin",
+            "bounds": active["bounds"],
+            "screen_signature": hashlib.sha1(f"{app_name}|{title}|{active['bounds']}".encode("utf-8")).hexdigest()[:16],
+            "element_count": 0,
+            "actionable_count": 0,
+            "elements": [],
+        }
+
+    window, handle = active
 
     try:
         window.set_focus()
@@ -399,27 +477,42 @@ def _normalize_code_for_compare(text: str) -> str:
     """Нормализовать код для безопасного сравнения без шума от переводов строк."""
     return str(text or "").replace("\r\n", "\n").rstrip("\n")
 
+def _strip_read_code_line_numbers(text: str) -> str:
+    """Remove read_code prefixes like '42| code' from copied snippets."""
+    raw = str(text or "").replace("\r\n", "\n")
+    stripped_lines = []
+    changed = False
+
+    for raw_line in raw.splitlines(keepends=True):
+        line_body = raw_line[:-1] if raw_line.endswith("\n") else raw_line
+        newline = "\n" if raw_line.endswith("\n") else ""
+        prefix, sep, rest = line_body.partition("|")
+
+        if sep and prefix.strip().isdigit() and (not rest or rest.startswith((" ", "\t"))):
+            stripped_lines.append(rest[1:] + newline if rest else newline)
+            changed = True
+        else:
+            stripped_lines.append(raw_line)
+
+    return "".join(stripped_lines) if changed else raw
+
 def _locate_code_block(lines: List[str], expected_old_code: str) -> Optional[tuple[int, int]]:
-    """Найти точный блок кода в файле и вернуть диапазон строк (1-indexed)."""
-    normalized_target = _normalize_code_for_compare(expected_old_code)
+    """Найти блок кода в файле и вернуть диапазон строк (1-indexed).
+
+    Если совпадений несколько — возвращает первое, чтобы не ломать edit_code
+    на файлах с дублирующимся кодом.
+    """
+    normalized_target = _normalize_code_for_compare(_strip_read_code_line_numbers(expected_old_code))
     if not normalized_target:
         return None
 
     normalized_file = "".join(lines).replace("\r\n", "\n")
     needle = normalized_target
-    matches = []
-    search_from = 0
-    while True:
-        idx = normalized_file.find(needle, search_from)
-        if idx == -1:
-            break
-        matches.append(idx)
-        search_from = idx + 1
-
-    if len(matches) != 1:
+    idx = normalized_file.find(needle)
+    if idx == -1:
         return None
 
-    start_char = matches[0]
+    start_char = idx
     end_char = start_char + len(needle)
     start_line = normalized_file[:start_char].count("\n") + 1
     matched_line_count = needle.count("\n") + 1
@@ -472,6 +565,7 @@ def _extract_real_search_url(raw_url: Optional[str]) -> str:
 
 def _format_search_results(search_results: List[Dict[str, str]], provider_name: str) -> ToolResult:
     formatted = [f"Search provider: {provider_name}"]
+    clean_results = []
     for i, result in enumerate(search_results[:10], 1):
         formatted.append(
             f"Результат {i}:\n"
@@ -479,7 +573,16 @@ def _format_search_results(search_results: List[Dict[str, str]], provider_name: 
             f"Ссылка: {result['link']}\n"
             f"Описание: {result['snippet'][:280]}"
         )
-    return ToolResult(True, "\n\n".join(formatted))
+        clean_results.append({
+            "title": result["title"],
+            "link": result["link"],
+            "snippet": result["snippet"][:280],
+        })
+    return ToolResult(True, {
+        "provider": provider_name,
+        "results": clean_results,
+        "formatted": "\n\n".join(formatted),
+    })
 
 def _search_with_google_playwright(query: str) -> ToolResult:
     from playwright.sync_api import sync_playwright
@@ -592,39 +695,60 @@ def _search_with_google_playwright(query: str) -> ToolResult:
             browser.close()
 
 def _search_with_duckduckgo_html(query: str) -> ToolResult:
-    response = requests.get(
-        f"https://html.duckduckgo.com/html/?q={quote_plus(query)}",
+    session = requests.Session()
+    # DuckDuckGo требует живую сессию (homepage) перед выдачей результатов
+    session.get(
+        "https://duckduckgo.com/",
         headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             "Accept-Language": "en-US,en;q=0.9,ru;q=0.8",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
+        timeout=15,
+    )
+    response = session.post(
+        "https://html.duckduckgo.com/html/",
+        data={"q": query, "b": "Search"},
+        headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9,ru;q=0.8",
+            "Referer": "https://duckduckgo.com/",
         },
         timeout=15,
     )
     response.raise_for_status()
     page_html = response.text
 
-    block_pattern = re.compile(r'<div[^>]*class="result[^"]*"[^>]*>(.*?)</div>\s*</div>', re.IGNORECASE | re.DOTALL)
-    link_pattern = re.compile(r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.IGNORECASE | re.DOTALL)
-    snippet_pattern = re.compile(r'<a[^>]*class="result__snippet"[^>]*>(.*?)</a>|<div[^>]*class="result__snippet"[^>]*>(.*?)</div>', re.IGNORECASE | re.DOTALL)
+    body_pattern = re.compile(
+        r'result__body"\s*>\s*<!--.*?-->(.*?)<div class="clear"></div>',
+        re.IGNORECASE | re.DOTALL,
+    )
+    link_pattern = re.compile(
+        r'result__a"?[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
+        re.IGNORECASE | re.DOTALL,
+    )
+    snippet_pattern = re.compile(
+        r'result__snippet"?[^>]*>(.*?)</a>',
+        re.IGNORECASE | re.DOTALL,
+    )
 
     search_results = []
-    for block_match in block_pattern.finditer(page_html):
-        block_html = block_match.group(1)
-        link_match = link_pattern.search(block_html)
+    for body_match in body_pattern.finditer(page_html):
+        body = body_match.group(1)
+        link_match = link_pattern.search(body)
         if not link_match:
             continue
 
         link = _extract_real_search_url(link_match.group(1))
         title = _normalize_search_text(link_match.group(2))
+        snippet_match = snippet_pattern.search(body)
+        snippet = _normalize_search_text(snippet_match.group(1)) if snippet_match else ""
         if not link or not title:
             continue
-
-        snippet_match = snippet_pattern.search(block_html)
-        snippet = _normalize_search_text((snippet_match.group(1) or snippet_match.group(2)) if snippet_match else "")
         search_results.append({"title": title, "link": link, "snippet": snippet})
 
     if search_results:
-        return _format_search_results(search_results, "DuckDuckGo HTML")
+        return _format_search_results(search_results, "DuckDuckGo")
 
     page_text = _normalize_search_text(page_html).lower()
     if "no results" in page_text:
@@ -633,7 +757,8 @@ def _search_with_duckduckgo_html(query: str) -> ToolResult:
 
 def _search_with_bing(query: str) -> ToolResult:
     response = requests.get(
-        f"https://www.bing.com/search?q={quote_plus(query)}",
+        "https://www.bing.com/search",
+        params={"q": query, "format": "rss"},
         headers={
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             "Accept-Language": "en-US,en;q=0.9,ru;q=0.8",
@@ -643,33 +768,35 @@ def _search_with_bing(query: str) -> ToolResult:
     response.raise_for_status()
     page_html = response.text
 
-    block_pattern = re.compile(r'<li[^>]*class="b_algo"[^>]*>(.*?)</li>', re.IGNORECASE | re.DOTALL)
-    link_pattern = re.compile(r'<h2[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.IGNORECASE | re.DOTALL)
-    snippet_pattern = re.compile(r'<p>(.*?)</p>', re.IGNORECASE | re.DOTALL)
+    item_pattern = re.compile(r'<item>(.*?)</item>', re.IGNORECASE | re.DOTALL)
+    title_pattern = re.compile(r'<title>(.*?)</title>', re.IGNORECASE | re.DOTALL)
+    link_pattern = re.compile(r'<link>(.*?)</link>', re.IGNORECASE | re.DOTALL)
+    desc_pattern = re.compile(r'<description>(.*?)</description>', re.IGNORECASE | re.DOTALL)
 
     search_results = []
-    for block_match in block_pattern.finditer(page_html):
-        block_html = block_match.group(1)
-        link_match = link_pattern.search(block_html)
-        if not link_match:
+    for item_match in item_pattern.finditer(page_html):
+        item_html = item_match.group(1)
+        title_match = title_pattern.search(item_html)
+        link_match = link_pattern.search(item_html)
+        if not title_match or not link_match:
             continue
 
+        title = _normalize_search_text(title_match.group(1))
         link = _extract_real_search_url(link_match.group(1))
-        title = _normalize_search_text(link_match.group(2))
-        if not link or not title:
+        if not title or not link:
             continue
 
-        snippet_match = snippet_pattern.search(block_html)
-        snippet = _normalize_search_text(snippet_match.group(1) if snippet_match else "")
+        desc_match = desc_pattern.search(item_html)
+        snippet = _normalize_search_text(desc_match.group(1) if desc_match else "")
         search_results.append({"title": title, "link": link, "snippet": snippet})
 
     if search_results:
-        return _format_search_results(search_results, "Bing")
+        return _format_search_results(search_results, "Bing RSS")
 
     page_text = _normalize_search_text(page_html).lower()
-    if "there are no results for" in page_text or "no results found for" in page_text:
+    if "there are no results" in page_text or "no results found" in page_text:
         return ToolResult(False, None, f"No search results found for query: {query.strip()[:200]}")
-    return ToolResult(False, None, "Bing search returned no parsable results.")
+    return ToolResult(False, None, "Bing RSS search returned no parsable results.")
 
 def _read_text_file_lines(path: str):
     encodings = ['utf-8', 'cp1251', 'cp866', 'latin-1']
@@ -794,9 +921,59 @@ def _take_region_screenshot(region: Optional[Dict[str, int]] = None, max_width: 
         )
         offset_x = int(region.get("x", 0) or 0)
         offset_y = int(region.get("y", 0) or 0)
-        screenshot = ImageGrab.grab(bbox=bbox)
+        try:
+            screenshot = ImageGrab.grab(bbox=bbox)
+        except Exception:
+            if sys.platform != "darwin":
+                raise
+            screenshot = None
     else:
-        screenshot = ImageGrab.grab()
+        try:
+            screenshot = ImageGrab.grab()
+        except Exception:
+            if sys.platform != "darwin":
+                raise
+            screenshot = None
+
+    if screenshot is None and sys.platform == "darwin":
+        import tempfile
+        fallback_path = os.path.join(tempfile.gettempdir(), f"screenshot_macos_{int(time.time() * 1000)}.png")
+        command = ["screencapture", "-x"]
+        if region:
+            command.extend(["-R", f"{offset_x},{offset_y},{region.get('width', 0)},{region.get('height', 0)}"])
+        command.append(fallback_path)
+        result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            screenshot = Image.open(fallback_path).convert("RGB")
+        else:
+            # На Retina -R использует физические, а Accessibility отдаёт
+            # логические координаты. Снимаем весь экран и обрезаем сами.
+            full_path = os.path.join(tempfile.gettempdir(), f"screenshot_macos_full_{int(time.time() * 1000)}.png")
+            full_result = subprocess.run(
+                ["screencapture", "-x", full_path],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if full_result.returncode != 0:
+                raise RuntimeError(full_result.stderr.strip() or result.stderr.strip() or "Could not take a macOS screenshot")
+            full_image = Image.open(full_path).convert("RGB")
+            try:
+                import pyautogui
+                logical_width, logical_height = pyautogui.size()
+            except Exception:
+                logical_width, logical_height = full_image.size
+            scale_x = full_image.width / max(float(logical_width), 1.0)
+            scale_y = full_image.height / max(float(logical_height), 1.0)
+            crop_box = (
+                max(0, int(round(offset_x * scale_x))),
+                max(0, int(round(offset_y * scale_y))),
+                min(full_image.width, int(round((offset_x + region.get("width", 0)) * scale_x))),
+                min(full_image.height, int(round((offset_y + region.get("height", 0)) * scale_y))),
+            )
+            screenshot = full_image.crop(crop_box)
+            if region.get("width", 0) and region.get("height", 0):
+                screenshot = screenshot.resize((int(region["width"]), int(region["height"])), Image.Resampling.LANCZOS)
 
     orig_width, orig_height = screenshot.size
     scale_factor = 1.0
@@ -826,6 +1003,27 @@ def _take_region_screenshot(region: Optional[Dict[str, int]] = None, max_width: 
     _state._last_screenshot_path = temp_path
     _state._last_screenshot_meta = dict(meta)
     return temp_path, meta, screenshot
+
+
+def _type_text_platform(text: str, pyautogui_module) -> None:
+    """Ввод текста с поддержкой Unicode на macOS через буфер обмена."""
+    if sys.platform != "darwin":
+        pyautogui_module.write(text, interval=0.03)
+        return
+    result = subprocess.run(
+        ["pbcopy"], input=str(text or ""), text=True,
+        capture_output=True, timeout=5,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "pbcopy failed")
+    pyautogui_module.hotkey("command", "v")
+
+
+def _hotkey_platform(keys: List[str], pyautogui_module) -> None:
+    normalized = [str(key).strip().lower() for key in keys if str(key).strip()]
+    if sys.platform == "darwin":
+        normalized = ["command" if key in {"ctrl", "control", "win", "cmd"} else key for key in normalized]
+    pyautogui_module.hotkey(*normalized)
 
 def _extract_ocr_elements_from_screenshot(screenshot_path: str,
                                           screenshot_meta: Optional[Dict[str, Any]] = None,
@@ -1011,7 +1209,8 @@ def _detect_yellow_play_targets(screenshot_path: str,
 
 def _build_visual_routes_from_observations(screenshot_path: Optional[str],
                                            screenshot_meta: Optional[Dict[str, Any]],
-                                           ocr_elements: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+                                           ocr_elements: List[Dict[str, Any]],
+                                           text_action: str = "focus") -> List[Dict[str, Any]]:
     routes = []
     if screenshot_path:
         routes.extend(_detect_yellow_play_targets(screenshot_path, screenshot_meta, ocr_elements))
@@ -1027,7 +1226,7 @@ def _build_visual_routes_from_observations(screenshot_path: Optional[str],
         text_center_y = int((bounds.get("top", 0) + bounds.get("bottom", 0)) / 2)
         routes.append({
             "target": name,
-            "action": "focus",
+            "action": text_action,
             "route_type": "text_anchor",
             "click_position": {"x": text_center_x, "y": text_center_y},
             "confidence": round(0.35 + min(float(item.get("ocr_confidence", 0.0) or 0.0), 1.0) * 0.25, 3),
@@ -1072,6 +1271,8 @@ def _find_best_visual_route(target: str, action: str, routes: List[Dict[str, Any
     return (candidates[0]["route"] if candidates else None), candidates[:5]
 
 def _looks_like_web_app_context(context: Dict[str, Any]) -> bool:
+    if context.get("platform") == "darwin":
+        return True
     class_name = str(context.get("class_name") or "").lower()
     elements = context.get("elements", []) or []
 
@@ -1080,4 +1281,3 @@ def _looks_like_web_app_context(context: Dict[str, Any]) -> bool:
     if any((item.get("class_name") or "").lower() == "chrome_renderwidgethosthwnd" for item in elements):
         return True
     return False
-

@@ -1,0 +1,1814 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <link rel="icon" href="data:,"/>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+  <title>Задания 1-4</title>
+
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+
+  <link rel="stylesheet" href="/css/choices.js.min@11.1.0.css?c39e073e"/>
+  <script src="/js/lib/choices.js.min@11.1.0.js?8f79c18e"></script>
+
+      <link href="/css/styles2.css?83c2ae2d" rel="stylesheet">
+
+  <link rel="stylesheet" href="/css/jquery-ui@1.13.2.css?014b1818">
+  <link rel="stylesheet" href="/js/trumbowyg/trumbowyg.min.css?64b5b09d">
+  <link rel="stylesheet" href="/js/trumbowyg/trumbowyg.colors.min.css?d2aed1a0">
+
+  <script src="/js/lib/jquery@3.6.0.min.js?7c14a783"></script>
+  <script src="/js/lib/jquery-ui.min@1.13.2.js?b4baecb7"></script>
+
+  <script src="/js/lib/select2.min@4.0.13.js?8dddaaf0"></script>
+  <link rel="stylesheet" href="/css/select2.min@4.0.13.css?bc523f92"/>
+  <script src="/js/common.js?b31e701b"></script>
+
+</head>
+
+
+
+<body dir="ltr"
+      class="freebirdLightBackground m2 no-collapse test preceptPoints">
+<meta itemprop="name" content="Задания 1-4">
+
+
+  <div class="top-menu ">
+    <span class="menu-item menu-item-root">
+        Русский<span class="mc">_100</span>
+      &nbsp;&nbsp;ЕГЭ
+    </span>
+    <div class="menu-toggle" aria-label="Toggle menu"></div>
+    <div class="menu-items">
+          <a class="menu-item menu-item-1 " href="/dash/">
+            Дашборд
+          </a>
+
+      <a class="menu-item menu-item-2 " href="/workouts/">
+        Задания
+      </a>
+      <a class="menu-item menu-item-3 " href="/results/">
+        Результаты
+      </a>
+      <div class="menu-item menu-item-4 menu-item-tests hover-host ">
+        <span>Тесты</span>
+        <div class="menu-dropdown parent-hover-visible2"></div>
+      </div>
+      <div class="menu-item menu-item-5 menu-item-extras hover-host ">
+        <span>Пауза</span>
+        <div class="menu-dropdown parent-hover-visible2">
+          <a href="/extras/exercises" class="menu-item-exercises">Разминки</a>
+          <a href="/extras/psypod" class="menu-item-psypod">Подкасты от психолога</a>
+        </div>
+      </div>
+
+          <div class="menu-item menu-item-profile hover-host">
+            <span class="user-icon">
+                   
+
+
+            </span>
+            <div class="user-dropdown">
+              <p><span class="user-name">Роман</span> <span
+                        class="user-email">antplanet4@gmail.com</span></p>
+              <div class="user-dropdown2">
+                    <a class="noWrap" href="/manual/"><i class='fa-solid fa-circle-question'></i> Инструкции</a>
+
+                <a class="noWrap" href="/logout" class="logout-button"><i class="fa-solid fa-right-from-bracket"></i>
+                  Выйти</a>
+
+              </div>
+
+            </div>
+          </div>
+    </div>
+  </div>
+
+
+<script src="/js/MainMenu.js?d81ce58c"></script>
+<script>
+    $(() => {
+        new MenuController();
+    })
+</script>
+<div id="page-loading-overlay"
+     style="position: fixed;inset: 0;z-index: 2147483647;display: flex;align-items: center;justify-content: center;background: rgba(120, 120, 120, 0.42);">
+  <svg width="64" height="64" viewBox="0 0 50 50" aria-hidden="true"
+       style="display: block;animation: pageLoadingRotate 1.2s linear infinite;">
+    <circle cx="25" cy="25" r="20" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="4"></circle>
+    <circle cx="25" cy="25" r="20" fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round"
+            stroke-dasharray="90 36"></circle>
+  </svg>
+</div>
+<style>
+    @keyframes pageLoadingRotate {
+        from {
+            transform: rotate(0deg);
+        }
+        to {
+            transform: rotate(360deg);
+        }
+    }
+</style>
+<script>
+    (function () {
+        const overlayId = 'page-loading-overlay';
+
+        function getOverlay() {
+            return document.getElementById(overlayId);
+        }
+
+        function ensureMessageContainer(overlay) {
+            let box = overlay.querySelector('.loading-msg');
+            if (box) return box;
+
+            box = document.createElement('div');
+            box.className = 'loading-msg';
+            box.style.cssText = `position:absolute;bottom:40px;left:50%;transform:translateX(-50%);max-width:90vw;padding:10px 14px;border-radius:8px;background:rgba(0,0,0,0.55);color:#fff;font:14px/1.4 Arial, sans-serif;text-align:center;opacity:0;transition:opacity .3s;pointer-events:none;`;
+            overlay.appendChild(box);
+            return box;
+        }
+
+        function showMessage(text) {
+            const overlay = getOverlay();
+            if (!overlay) return;
+
+            const box = ensureMessageContainer(overlay);
+            box.textContent = text;
+            box.style.opacity = '1';
+        }
+
+        function step(delay, text) {
+            setTimeout(function () {
+                if (!getOverlay()) return;
+                showMessage(text);
+            }, delay);
+        }
+
+        // этапы
+        step(5000, 'Загрузка занимает больше времени, чем обычно…');
+        step(15000, 'Если вы используете VPN — попробуйте отключить его и обновить страницу.');
+        step(30000, 'Попробуйте обновить страницу.');
+    })();
+</script>
+
+<div class="freebirdFormviewerViewFormContentWrapper">
+  <div class="freebirdFormviewerViewHeaderCard freebirdFormviewerViewCenteredContent freebirdViewerHeaderCard freebirdHeaderCard"></div>
+  <div class="freebirdFormviewerViewCenteredContent">
+    <div id="timerCont" class="printer-hidden">
+      <div id="timer">
+        Осталось времени<br/>
+        <time id="remainingTime">00:00:00</time>
+      </div>
+    </div>
+    <form action="/test/test51465/" target="_self" method="POST" id="theForm"
+          enctype="application/x-www-form-urlencoded">
+      <input type="hidden" name="preceptPointData" id="preceptPointDataField"/>
+      <div class="freebirdFormviewerViewFormCard exportFormCard">
+  <div id="printButtonCont" class="button-row">
+        <a class="restartBtn accentButton2" href="/test/test51465/?doNotContinue=3782963">
+          <span>Заново</span><i class="fa-solid fa-rotate-left"></i>
+        </a>
+    <div class="debug-button accentButton2" data-role="button"><span></span><i
+              class="fa-solid fa-bug-slash"></i></div>
+        <div role="button"
+             id="printButton"
+             onclick="window.print();return false;"
+             class="appsMaterialWizButtonEl appsMaterialWizButtonPaperbuttonEl appsMaterialWizButtonPaperbuttonFilled freebirdFormviewerViewNavigationSubmitButton freebirdThemedFilledButtonM2 isUndragged isActive">
+          <div class="appsMaterialWizButtonPaperbuttonRipple exportInk"></div>
+          <div class="appsMaterialWizButtonPaperbuttonFocusOverlay exportOverlay"></div>
+          <span class="appsMaterialWizButtonPaperbuttonContent exportButtonContent"><span
+                    class="appsMaterialWizButtonPaperbuttonLabel quantumWizButtonPaperbuttonLabel exportLabel">Печатать</span></span>
+        </div>
+  </div>
+
+        <div class="freebirdFormviewerViewFormContent">
+          <div class="freebirdFormviewerViewNoPadding">
+            <div class="freebirdFormviewerViewHeaderHeader exportHeader">
+              <div class="freebirdFormviewerViewHeaderThemeStripe freebirdSolidBackground exportThemeStripe"></div>
+              <div class="freebirdFormviewerViewHeaderTitleRow">
+                <div class="freebirdFormviewerViewHeaderTitle exportFormTitle freebirdCustomFont"
+                     dir="auto" role="heading" aria-level="1">Задания 1-4
+                </div>
+              </div>
+              <div class="freebirdFormviewerViewHeaderDescription" style="white-space: initial;">
+                <p>
+                      Ответами к заданиям 1–20 являются цифра (число) или слово (несколько
+                      слов),
+                      последовательность цифр (чисел).<br/>
+                      Ответ запишите в поле ответа в тексте работы.
+                </p>
+              </div>
+              <div class="freebirdCommonViewSecurequizSecureQuizBannerContainer"></div>
+              <div class="freebirdFormviewerViewHeaderEmailAndSaveStatusContainer"></div>
+
+            </div>
+          </div>
+              <div id="question-pager-cont" class="printer-hidden">
+                <div id="progressbar-cont"></div>
+                <div id="question-pager" class="question-pager" role="list"></div>
+                <div id="question-pager-animations-cont" class="hidden"></div>
+              </div>
+          <div class="freebirdFormviewerViewItemList" role="list">
+
+  <div class="freebirdFormviewerViewNumberedItemContainer extraTextBefore-cont" role="listitem"
+       data-question-numbers="1,2,3">
+    <div class="m2">
+      <div class="freebirdFormviewerComponentsQuestionBaseRoot "
+           data-question-number="1"
+           data-question-id="5153"
+           data-format-id="1"
+      >
+        <div class="freebirdFormviewerComponentsQuestionBaseHeader">
+          <div class="freebirdFormviewerComponentsQuestionBaseTitleDescContainer">
+            <div class="freebirdFormviewerComponentsQuestionBaseTitle exportItemTitle freebirdCustomFont">
+                  <p class="bigText-title">Прочитайте текст и выполните задания 1—3.</p>
+            </div>
+            <div class="freebirdFormviewerComponentsQuestionBaseDescription bigTextMessage">
+              <div class="more printer-hidden"><span></span></div>
+                        <p>Хохломские <strong><u>изделия</u></strong> расходились по всей России, вывозились в Азию и Европу, привлекая своей оригинальной раскраской и прекрасной лакировкой, радуя глаз праздничностью расцветки, красотой орнамента. Изделия были дёшевы и прочны, &lt;...&gt; для украшения посуды, которой пользовались ежедневно, серебро было слишком дорого, и хохломские художники стали применять олово: тонко растёртым порошком олова они <strong><u>протирали</u></strong> поверхность предмета так, что деревянная посуда приобретала вид металлической и блестела, как серебряная.</p><p>Прекрасным произведением искусства хохломских мастеров является братина. Название её рассказывает о древнем обычае, когда наши далёкие предки, связанные родственными узами, готовясь к какому-нибудь <strong><u>важному</u></strong> делу, собирались на общий пир, а в братине подносили к столу праздничный напиток. Удивителен наряд братины: на чёрном фоне написан сказочно красивый цветок, который <strong><u>горит</u></strong> ярким пламенем, и от этого ярче блестит золото на ободке и шейке <strong><u>сосуда</u></strong>. Художник здесь воспроизвёл, по-видимому, тот волшебный красный цветок, который, по народным преданиям, приносил счастье, но увидеть его можно было только один раз в году — в ночь на Иванов день. На хохломских изделиях изображён только растительный орнамент: скромная и изящная травка, гибкие, волнистые стебли с листьями, ягодки и цветы. На одних вещах стебли цветков вытягиваются вверх, на других завиваются и бегут по кругу. В этих поэтических рисунках отразилась любовь русского человека к природе. Мягко светящиеся золотом, украшенные чёрно-красной травкой миски, блюда, ложки, солонки стали любимой посудой деревенского люда и своим нарядом вносили радость даже в самое бедное жилище.</p><p><em>(По</em> <em>С.А.</em> <em>Жегаповой)</em></p>
+
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="freebirdFormviewerViewNumberedItemContainer question-cont limiting-cont" role="listitem"
+       data-question-number="1" data-question-type="Plain">
+    <div class="m2">
+      <div class="freebirdFormviewerComponentsQuestionBaseRoot "
+           data-question-number="1"
+           data-question-id="5153"
+           data-format-id="1">
+        <div class="freebirdFormviewerComponentsQuestionBaseHeader">
+          <div class="freebirdFormviewerComponentsQuestionBaseTitleDescContainer">
+            <div class="freebirdFormviewerComponentsQuestionBaseTitle exportItemTitle freebirdCustomFont question-title">
+                  <div class="question-number d-titleNotFormatted">
+                    Задание 1 </div>
+                  <div class="question-title-cont">
+                          Самостоятельно подберите противительный союз, который должен стоять на месте пропуска во втором предложении текста. Запишите этот союз.
+                  </div>
+
+            </div>
+            <div class="freebirdFormviewerComponentsQuestionBaseDescription question-body-container">
+              <div class="more printer-hidden"><span></span></div>
+      <div class="question-message"></div>
+          <div class="question-message-more">
+                  
+          </div>
+            </div>
+          </div>
+        </div>
+  <div class="freebirdFormviewerComponentsQuestionTextRoot">
+    <div class="quantumWizTextinputPaperinputEl freebirdFormviewerComponentsQuestionTextShort freebirdFormviewerComponentsQuestionTextTextInput freebirdThemedInput modeLight">
+      <div class="quantumWizTextinputPaperinputMainContent exportContent">
+        <div class="hidden shadow-answer"></div>
+        <div class="quantumWizTextinputPaperinputContentArea exportContentArea">
+          <div class="quantumWizTextinputPaperinputInputArea">
+            <input type="text"
+                   enterkeyhint="next"
+                   class="quantumWizTextinputPaperinputInput exportInput required"
+                   autocomplete="off"
+                   spellcheck="false"
+                   autocorrect="off"
+                   writingsuggestions="false"
+                   autocapitalize="off"
+                   name="question1"/>
+            <div class="quantumWizTextinputPaperinputPlaceholder exportLabel">
+              Мой ответ
+            </div>
+          </div>
+          <div class="quantumWizTextinputPaperinputUnderline exportUnderline"></div>
+          <div jsname="XmnwAc"
+               class="quantumWizTextinputPaperinputFocusUnderline exportFocusUnderline"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="freebirdFormviewerComponentsQuestionBaseValidationError"
+       role="alert">
+    <div class="freebirdMaterialIconIconEl freebirdMaterialIconIconUpdatedM2 rm12">
+      <div class="freebirdMaterialIconIconImage freebirdMaterialIconIconM2Icon freebird-qp-icon-error-outline-red"></div>
+    </div>
+    <div class="answer-error-message">Это обязательный вопрос.</div>
+  </div>
+      </div>
+      <div class="question-notes hidden">
+          
+      </div>
+    </div>
+  </div>
+
+
+  <div class="freebirdFormviewerViewNumberedItemContainer question-cont limiting-cont" role="listitem"
+       data-question-number="2" data-question-type="TypeAll">
+    <div class="m2">
+      <div class="freebirdFormviewerComponentsQuestionBaseRoot "
+           data-question-number="2"
+           data-question-id="5125"
+           data-format-id="2">
+        <div class="freebirdFormviewerComponentsQuestionBaseHeader">
+          <div class="freebirdFormviewerComponentsQuestionBaseTitleDescContainer">
+            <div class="freebirdFormviewerComponentsQuestionBaseTitle exportItemTitle freebirdCustomFont question-title">
+                  <div class="question-number d-titleNotFormatted">
+                    Задание 2 </div>
+                  <div class="question-title-cont">
+                          В тексте выделено пять слов. Укажите варианты ответов, в которых лексическое значение выделенного слова соответствует его значению в данном тексте.
+                  </div>
+
+            </div>
+            <div class="freebirdFormviewerComponentsQuestionBaseDescription question-body-container">
+              <div class="more printer-hidden"><span></span></div>
+      <div class="question-message"><p>1) <b>ИЗДЕЛИЕ</b>. Вещь, товар. <i>Ремонт</i> <i>металлических</i> <i>изделий.</i></p><p>2) <b>ПРОТИРАТЬ</b>. Продырявливать трением. <i>Протирать</i> <i>локти</i> <i>до</i> <i>дыр.</i></p><p>3) <b>ВАЖНЫЙ</b>. Высокий по должности, положению (<i>разг.</i>). <i>Важный</i> <i>начальник.</i></p><p>4) <b>ГОРЕТЬ</b>. Сверкать, блестеть. <i>Горит</i> <i>заря.</i></p><p>5) <b>СОСУД</b>. Трубчатый орган (в животных или растительных организмах), по которому движется жидкое вещество. <i>Кровеносные сосуды.</i></p></div>
+          <div class="question-message-more">
+                  
+          </div>
+            </div>
+          </div>
+        </div>
+  <div class="freebirdFormviewerComponentsQuestionTextRoot">
+    <div class="quantumWizTextinputPaperinputEl freebirdFormviewerComponentsQuestionTextShort freebirdFormviewerComponentsQuestionTextTextInput freebirdThemedInput modeLight">
+      <div class="quantumWizTextinputPaperinputMainContent exportContent">
+        <div class="hidden shadow-answer"></div>
+        <div class="quantumWizTextinputPaperinputContentArea exportContentArea">
+          <div class="quantumWizTextinputPaperinputInputArea">
+            <input type="text"
+                      inputmode="numeric"
+                      pattern="[0-9 ]*"
+                      oninput="this.value = this.value.replace(/[^\d ]+/g, '')"
+                   enterkeyhint="next"
+                   class="quantumWizTextinputPaperinputInput exportInput required"
+                   autocomplete="off"
+                   spellcheck="false"
+                   autocorrect="off"
+                   writingsuggestions="false"
+                   autocapitalize="off"
+                   name="question2"/>
+            <div class="quantumWizTextinputPaperinputPlaceholder exportLabel">
+              Мой ответ
+            </div>
+          </div>
+          <div class="quantumWizTextinputPaperinputUnderline exportUnderline"></div>
+          <div jsname="XmnwAc"
+               class="quantumWizTextinputPaperinputFocusUnderline exportFocusUnderline"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="freebirdFormviewerComponentsQuestionBaseValidationError"
+       role="alert">
+    <div class="freebirdMaterialIconIconEl freebirdMaterialIconIconUpdatedM2 rm12">
+      <div class="freebirdMaterialIconIconImage freebirdMaterialIconIconM2Icon freebird-qp-icon-error-outline-red"></div>
+    </div>
+    <div class="answer-error-message">Это обязательный вопрос.</div>
+  </div>
+      </div>
+      <div class="question-notes hidden">
+          
+      </div>
+    </div>
+  </div>
+
+
+  <div class="freebirdFormviewerViewNumberedItemContainer question-cont limiting-cont" role="listitem"
+       data-question-number="3" data-question-type="TypeAll">
+    <div class="m2">
+      <div class="freebirdFormviewerComponentsQuestionBaseRoot "
+           data-question-number="3"
+           data-question-id="5181"
+           data-format-id="3">
+        <div class="freebirdFormviewerComponentsQuestionBaseHeader">
+          <div class="freebirdFormviewerComponentsQuestionBaseTitleDescContainer">
+            <div class="freebirdFormviewerComponentsQuestionBaseTitle exportItemTitle freebirdCustomFont question-title">
+                  <div class="question-number d-titleNotFormatted">
+                    Задание 3 </div>
+                  <div class="question-title-cont">
+                          Укажите варианты ответов, в которых даны верные характеристики фрагмента текста. Запишите номера этих ответов.
+                  </div>
+
+            </div>
+            <div class="freebirdFormviewerComponentsQuestionBaseDescription question-body-container">
+              <div class="more printer-hidden"><span></span></div>
+      <div class="question-message"><p>1) Наряду с нейтральной и общеупотребительной лексикой в тексте используются как разговорное слово (<i>люд</i>), так и высокая лексика (<i>узы</i>), а также историзм (<i>братина</i>) и устаревшее слово (<i>пир</i>).</p><p>2) Текст реализует как функцию сообщения, так и функцию воздействия на воображение читателя, что достигается использованием имён прилагательных не только в информативной функции (<i>хохломские </i>изделия, <i>деревянная</i> посуда, по <i>народным </i>преданиям, <i>деревенского </i>люда), но и в роли эпитетов (<i>скромная </i>и <i>изящная </i>травка; <i>гибкие, волн</i><i>истые </i>стебли и др.), использованием и глаголов, которые имеют значение конкретного физического действия (<i>выв</i><i>озились,</i> <i>пользовались,</i> <i>протирали</i>), и яркой глагольной лексики, глаголов в переносном значении (цветок <i>горит,</i> <i>блес</i><i>тит</i> золото, стебли <i>вытягиваются,</i> <i>завиваются</i> и <i>бегут</i>).</p><p>3) Текст содержит грамматические особенности, характерные для устной речи: использование междометий, усиливающих экспрессию частиц, преобладание ситуативно неполных предложений.</p><p>4) Синтаксические средства: ряды однородных членов предложения, предложения с обособленными обстоятельствами, выраженными деепричастными оборотами, со сравнительным оборотом — выполняют как функцию уточнения, так и изобразительную функцию.</p><p>5) Текст относится к разговорной речи, так как основные цели автора — непринуждённое общение с читателем, обмен мнениями на бытовые темы.</p></div>
+          <div class="question-message-more">
+                  
+          </div>
+            </div>
+          </div>
+        </div>
+  <div class="freebirdFormviewerComponentsQuestionTextRoot">
+    <div class="quantumWizTextinputPaperinputEl freebirdFormviewerComponentsQuestionTextShort freebirdFormviewerComponentsQuestionTextTextInput freebirdThemedInput modeLight">
+      <div class="quantumWizTextinputPaperinputMainContent exportContent">
+        <div class="hidden shadow-answer"></div>
+        <div class="quantumWizTextinputPaperinputContentArea exportContentArea">
+          <div class="quantumWizTextinputPaperinputInputArea">
+            <input type="text"
+                      inputmode="numeric"
+                      pattern="[0-9 ]*"
+                      oninput="this.value = this.value.replace(/[^\d ]+/g, '')"
+                   enterkeyhint="next"
+                   class="quantumWizTextinputPaperinputInput exportInput required"
+                   autocomplete="off"
+                   spellcheck="false"
+                   autocorrect="off"
+                   writingsuggestions="false"
+                   autocapitalize="off"
+                   name="question3"/>
+            <div class="quantumWizTextinputPaperinputPlaceholder exportLabel">
+              Мой ответ
+            </div>
+          </div>
+          <div class="quantumWizTextinputPaperinputUnderline exportUnderline"></div>
+          <div jsname="XmnwAc"
+               class="quantumWizTextinputPaperinputFocusUnderline exportFocusUnderline"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="freebirdFormviewerComponentsQuestionBaseValidationError"
+       role="alert">
+    <div class="freebirdMaterialIconIconEl freebirdMaterialIconIconUpdatedM2 rm12">
+      <div class="freebirdMaterialIconIconImage freebirdMaterialIconIconM2Icon freebird-qp-icon-error-outline-red"></div>
+    </div>
+    <div class="answer-error-message">Это обязательный вопрос.</div>
+  </div>
+      </div>
+      <div class="question-notes hidden">
+          
+      </div>
+    </div>
+  </div>
+
+  <div class="freebirdFormviewerViewNumberedItemContainer extraTextBefore-cont" role="listitem"
+       data-question-numbers="4,5,6">
+    <div class="m2">
+      <div class="freebirdFormviewerComponentsQuestionBaseRoot "
+           data-question-number="4"
+           data-question-id="7085"
+           data-format-id="1"
+      >
+        <div class="freebirdFormviewerComponentsQuestionBaseHeader">
+          <div class="freebirdFormviewerComponentsQuestionBaseTitleDescContainer">
+            <div class="freebirdFormviewerComponentsQuestionBaseTitle exportItemTitle freebirdCustomFont">
+                  <p class="bigText-title">Прочитайте текст и выполните задания 4—6.</p>
+            </div>
+            <div class="freebirdFormviewerComponentsQuestionBaseDescription bigTextMessage">
+              <div class="more printer-hidden"><span></span></div>
+                        <p>Для «Бло­кад­ной книги» мы пре­жде всего ис­ка­ли днев­ни­ки бло­кад­ни­ков — они были до­ро­же, чем лич­ные сви­де­тель­ства. Осо­бен­ность лю­бо­го днев­ни­ка — до­сто­вер­ность; обыч­но автор из­ла­га­ет не про­шлое, а се­го­дняш­нее, он не столь­ко вспо­ми­на­ет, сколь­ко де­лит­ся сво­и­ми вос­по­ми­на­ни­я­ми, со­об­ща­ет но­во­сти, рас­ска­зы­ва­ет то, что про­изо­шло се­год­ня.</p><p>Боль­шой тер­рор, ре­прес­сии от­учи­ли пи­тер­цев вести днев­ни­ки. За­ня­тие стало слиш­ком опас­ным. В бло­ка­ду эта есте­ствен­ная по­треб­ность вер­ну­лась с не­ожи­дан­ной <strong> силой</strong>, люди по­чув­ство­ва­ли себя участ­ни­ка­ми <nobr>ис­то­рии, &lt;...&gt;</nobr> за­хо­те­лось со­хра­нить, за­пи­сать не­по­вто­ри­мость про­ис­хо­дя­ще­го. Но было ещё одно об­сто­я­тель­ство: по­яви­лось со­кро­вен­ное ощу­ще­ние ду­хов­ной <strong> пищи</strong>; уди­ви­тель­но, но днев­ник по­мо­гал вы­жи­вать. Ум­ствен­ная ра­бо­та, ду­хов­ное осмыс­ле­ние под­дер­жи­ва­ли. После пуб­ли­ка­ции «Бло­кад­ной книги» нам стали при­но­сить днев­ни­ки; вдруг ока­за­лось, что, не­смот­ря на все ужасы, стра­да­ния, люди за­пи­сы­ва­ли по­дроб­но­сти своей жизни.</p><p>Вот днев­ник глав­но­го ин­же­не­ра Пятой ГЭС, бес­цен­ный имен­но сво­и­ми <strong> де­та­ля­ми</strong>.</p><p><em>9 ян­ва­ря 1942 года</em>: «Оста­лись без топ­ли­ва боль­ни­цы, гос­пи­та­ли, дома, уголь стал для Ле­нин­гра­да кро­вью, и этой крови всё мень­ше».</p><p><em>14 ян­ва­ря</em>: «Окон­чен мон­таж котла под ан­тра­цит. Нет здо­ро­во­го че­ло­ве­ка, при­год­но­го для руч­ной за­брос­ки в котёл угля».</p><p>Я ци­ти­рую лишь от­дель­ные строч­ки из этого за­ме­ча­тель­но­го днев­ни­ка, ко­то­рый вести́ было тоже по­дви­гом…</p><p>Каж­дый днев­ник по-сво­е­му <strong> пе­ре­даёт</strong> тра­ге­дию го­ро­да. В каж­дом днев­ни­ке есть та­лант на­блю­да­тель­но­сти, по­ни­ма­ние того, как <strong> дра­го­цен­ны</strong> по­дроб­но­сти этой не­ве­ро­ят­ной&nbsp; бло­кад­ной&nbsp; жизни людей.</p><p>(<em>По Д. А. Гра­ни­ну</em>)</p>
+
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="freebirdFormviewerViewNumberedItemContainer question-cont limiting-cont" role="listitem"
+       data-question-number="4" data-question-type="Plain">
+    <div class="m2">
+      <div class="freebirdFormviewerComponentsQuestionBaseRoot "
+           data-question-number="4"
+           data-question-id="7085"
+           data-format-id="1">
+        <div class="freebirdFormviewerComponentsQuestionBaseHeader">
+          <div class="freebirdFormviewerComponentsQuestionBaseTitleDescContainer">
+            <div class="freebirdFormviewerComponentsQuestionBaseTitle exportItemTitle freebirdCustomFont question-title">
+                  <div class="question-number d-titleNotFormatted">
+                    Задание 4 </div>
+                  <div class="question-title-cont">
+                          Са­мо­сто­я­тель­но под­бе­ри­те лич­ное ме­сто­име­ние, ко­то­рое долж­но сто­ять на месте про­пус­ка во вто­ром (2) аб­за­це тек­ста. За­пи­ши­те это ме­сто­име­ние.
+                  </div>
+
+            </div>
+            <div class="freebirdFormviewerComponentsQuestionBaseDescription question-body-container">
+              <div class="more printer-hidden"><span></span></div>
+      <div class="question-message"></div>
+          <div class="question-message-more">
+                  
+          </div>
+            </div>
+          </div>
+        </div>
+  <div class="freebirdFormviewerComponentsQuestionTextRoot">
+    <div class="quantumWizTextinputPaperinputEl freebirdFormviewerComponentsQuestionTextShort freebirdFormviewerComponentsQuestionTextTextInput freebirdThemedInput modeLight">
+      <div class="quantumWizTextinputPaperinputMainContent exportContent">
+        <div class="hidden shadow-answer"></div>
+        <div class="quantumWizTextinputPaperinputContentArea exportContentArea">
+          <div class="quantumWizTextinputPaperinputInputArea">
+            <input type="text"
+                   enterkeyhint="next"
+                   class="quantumWizTextinputPaperinputInput exportInput required"
+                   autocomplete="off"
+                   spellcheck="false"
+                   autocorrect="off"
+                   writingsuggestions="false"
+                   autocapitalize="off"
+                   name="question4"/>
+            <div class="quantumWizTextinputPaperinputPlaceholder exportLabel">
+              Мой ответ
+            </div>
+          </div>
+          <div class="quantumWizTextinputPaperinputUnderline exportUnderline"></div>
+          <div jsname="XmnwAc"
+               class="quantumWizTextinputPaperinputFocusUnderline exportFocusUnderline"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="freebirdFormviewerComponentsQuestionBaseValidationError"
+       role="alert">
+    <div class="freebirdMaterialIconIconEl freebirdMaterialIconIconUpdatedM2 rm12">
+      <div class="freebirdMaterialIconIconImage freebirdMaterialIconIconM2Icon freebird-qp-icon-error-outline-red"></div>
+    </div>
+    <div class="answer-error-message">Это обязательный вопрос.</div>
+  </div>
+      </div>
+      <div class="question-notes hidden">
+          
+      </div>
+    </div>
+  </div>
+
+
+  <div class="freebirdFormviewerViewNumberedItemContainer question-cont limiting-cont" role="listitem"
+       data-question-number="5" data-question-type="TypeAll">
+    <div class="m2">
+      <div class="freebirdFormviewerComponentsQuestionBaseRoot "
+           data-question-number="5"
+           data-question-id="9819"
+           data-format-id="2">
+        <div class="freebirdFormviewerComponentsQuestionBaseHeader">
+          <div class="freebirdFormviewerComponentsQuestionBaseTitleDescContainer">
+            <div class="freebirdFormviewerComponentsQuestionBaseTitle exportItemTitle freebirdCustomFont question-title">
+                  <div class="question-number d-titleNotFormatted">
+                    Задание 5 </div>
+                  <div class="question-title-cont">
+                          В тексте выделено пять слов. Укажите варианты ответов, в которых лексическое значение выделенного слова соответствует его значению в данном тексте. Запишите номера ответов.
+                  </div>
+
+            </div>
+            <div class="freebirdFormviewerComponentsQuestionBaseDescription question-body-container">
+              <div class="more printer-hidden"><span></span></div>
+      <div class="question-message"><p>1) <strong>СИЛА.</strong> обычно ед. Способность живых существ к физическим действиям, требующим значительного напряжения мышц. <em>Мышечная с. С. рук, ног. С. в руках, ногах у кого-л. Недюжинной силы кто-л.</em></p><p>2) <strong>ПИЩА.</strong> То, что служит источником чего-л., даёт материал духовной, интеллектуальной деятельности. <em>Духовная, умственная п. П. уму, сердцу. П. для острословия. Давать пищу чему-л., для чего-л. (способствовать возникновению, распространению чего-л.).</em></p><p>3) <strong>ДЕТАЛЬ.</strong> 1. Мелкая подробность, частность. <em>Разработать детали операции. Описать что-л. со всеми деталями. Входить во все детали. Это важная д.</em></p><p>4) <strong>ПЕРЕДАТЬ.</strong> кого-что. Отдать что-л. в полное распоряжение, владение другому (права, обязанности, деловые бумаги, рукописи и т. п.). <em>П. дела. П. свои права наследникам. П. управление помощнику. П. командование заместителю.</em></p><p>5) <strong>ДРАГОЦЕННЫЕ.</strong> Очень ценный, дорогой, стоящий больших денег.<em> Д. браслет. Д. ларец. Д. мех соболя. Д-ые камни (красивые, редкие минералы, используемые в ювелирных украшениях)</em>.</p></div>
+          <div class="question-message-more">
+                  
+          </div>
+            </div>
+          </div>
+        </div>
+  <div class="freebirdFormviewerComponentsQuestionTextRoot">
+    <div class="quantumWizTextinputPaperinputEl freebirdFormviewerComponentsQuestionTextShort freebirdFormviewerComponentsQuestionTextTextInput freebirdThemedInput modeLight">
+      <div class="quantumWizTextinputPaperinputMainContent exportContent">
+        <div class="hidden shadow-answer"></div>
+        <div class="quantumWizTextinputPaperinputContentArea exportContentArea">
+          <div class="quantumWizTextinputPaperinputInputArea">
+            <input type="text"
+                      inputmode="numeric"
+                      pattern="[0-9 ]*"
+                      oninput="this.value = this.value.replace(/[^\d ]+/g, '')"
+                   enterkeyhint="next"
+                   class="quantumWizTextinputPaperinputInput exportInput required"
+                   autocomplete="off"
+                   spellcheck="false"
+                   autocorrect="off"
+                   writingsuggestions="false"
+                   autocapitalize="off"
+                   name="question5"/>
+            <div class="quantumWizTextinputPaperinputPlaceholder exportLabel">
+              Мой ответ
+            </div>
+          </div>
+          <div class="quantumWizTextinputPaperinputUnderline exportUnderline"></div>
+          <div jsname="XmnwAc"
+               class="quantumWizTextinputPaperinputFocusUnderline exportFocusUnderline"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="freebirdFormviewerComponentsQuestionBaseValidationError"
+       role="alert">
+    <div class="freebirdMaterialIconIconEl freebirdMaterialIconIconUpdatedM2 rm12">
+      <div class="freebirdMaterialIconIconImage freebirdMaterialIconIconM2Icon freebird-qp-icon-error-outline-red"></div>
+    </div>
+    <div class="answer-error-message">Это обязательный вопрос.</div>
+  </div>
+      </div>
+      <div class="question-notes hidden">
+          
+      </div>
+    </div>
+  </div>
+
+
+  <div class="freebirdFormviewerViewNumberedItemContainer question-cont limiting-cont" role="listitem"
+       data-question-number="6" data-question-type="TypeAll">
+    <div class="m2">
+      <div class="freebirdFormviewerComponentsQuestionBaseRoot "
+           data-question-number="6"
+           data-question-id="9838"
+           data-format-id="3">
+        <div class="freebirdFormviewerComponentsQuestionBaseHeader">
+          <div class="freebirdFormviewerComponentsQuestionBaseTitleDescContainer">
+            <div class="freebirdFormviewerComponentsQuestionBaseTitle exportItemTitle freebirdCustomFont question-title">
+                  <div class="question-number d-titleNotFormatted">
+                    Задание 6 </div>
+                  <div class="question-title-cont">
+                          Укажите все варианты ответов, в которых даны верные характеристики фрагмента текста. Запишите номера этих ответов.
+                  </div>
+
+            </div>
+            <div class="freebirdFormviewerComponentsQuestionBaseDescription question-body-container">
+              <div class="more printer-hidden"><span></span></div>
+      <div class="question-message"><p>&nbsp;1) Текст написан в научном стиле; цель автора — избегая оценочных суждений, дать научное объяснение событий, происходивших в блокадном Ленинграде.<br>2) В первом и последнем абзацах сообщается об особенностях текстов, написанных в жанре дневника, и об их ценности.<br>3) Использование эпитетов (<em>«сокровенное ощущение духовной пищи», «невероятной блокадной жизни людей», «дневник... бесценный именно своими деталями»</em>) позволяет автору выразить своё отношение к описываемым событиям.<br>4) Развёрнуто изложить свои мысли автору помогает использование разнообразных синтаксических конструкций, среди которых — ряды однородных членов предложения, сложные предложения разных видов, цитирование.<br>5) Примеры из официального отчёта главного инженера позволяют читателю представить, как шёл процесс строительства гидроэлектростанции во время блокады Ленинграда.&nbsp;</p></div>
+          <div class="question-message-more">
+                  
+          </div>
+            </div>
+          </div>
+        </div>
+  <div class="freebirdFormviewerComponentsQuestionTextRoot">
+    <div class="quantumWizTextinputPaperinputEl freebirdFormviewerComponentsQuestionTextShort freebirdFormviewerComponentsQuestionTextTextInput freebirdThemedInput modeLight">
+      <div class="quantumWizTextinputPaperinputMainContent exportContent">
+        <div class="hidden shadow-answer"></div>
+        <div class="quantumWizTextinputPaperinputContentArea exportContentArea">
+          <div class="quantumWizTextinputPaperinputInputArea">
+            <input type="text"
+                      inputmode="numeric"
+                      pattern="[0-9 ]*"
+                      oninput="this.value = this.value.replace(/[^\d ]+/g, '')"
+                   enterkeyhint="next"
+                   class="quantumWizTextinputPaperinputInput exportInput required"
+                   autocomplete="off"
+                   spellcheck="false"
+                   autocorrect="off"
+                   writingsuggestions="false"
+                   autocapitalize="off"
+                   name="question6"/>
+            <div class="quantumWizTextinputPaperinputPlaceholder exportLabel">
+              Мой ответ
+            </div>
+          </div>
+          <div class="quantumWizTextinputPaperinputUnderline exportUnderline"></div>
+          <div jsname="XmnwAc"
+               class="quantumWizTextinputPaperinputFocusUnderline exportFocusUnderline"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="freebirdFormviewerComponentsQuestionBaseValidationError"
+       role="alert">
+    <div class="freebirdMaterialIconIconEl freebirdMaterialIconIconUpdatedM2 rm12">
+      <div class="freebirdMaterialIconIconImage freebirdMaterialIconIconM2Icon freebird-qp-icon-error-outline-red"></div>
+    </div>
+    <div class="answer-error-message">Это обязательный вопрос.</div>
+  </div>
+      </div>
+      <div class="question-notes hidden">
+          
+      </div>
+    </div>
+  </div>
+
+  <div class="freebirdFormviewerViewNumberedItemContainer extraTextBefore-cont" role="listitem"
+       data-question-numbers="7,8,9">
+    <div class="m2">
+      <div class="freebirdFormviewerComponentsQuestionBaseRoot "
+           data-question-number="7"
+           data-question-id="7120"
+           data-format-id="1"
+      >
+        <div class="freebirdFormviewerComponentsQuestionBaseHeader">
+          <div class="freebirdFormviewerComponentsQuestionBaseTitleDescContainer">
+            <div class="freebirdFormviewerComponentsQuestionBaseTitle exportItemTitle freebirdCustomFont">
+                  <p class="bigText-title">Прочитайте текст и выполните задания 7—9.</p>
+            </div>
+            <div class="freebirdFormviewerComponentsQuestionBaseDescription bigTextMessage">
+              <div class="more printer-hidden"><span></span></div>
+                        <p>На­блю­де­ния над фо­не­ти­че­ски­ми сход­ства­ми слов-се­ман­ти­че­ских эк­ви­ва­лен­тов в со­вре­мен­ных род­ствен­ных язы­ках по­мо­га­ют вы­явить тот общий прин­цип но­ми­на­ции де­но­та­та, ко­то­рый мог <strong>сло­жить­ся</strong> в далёком про­шлом.</p><p>Так, <…>, в на­зва­нии лист­вен­но­го де­ре­ва со свет­лым (белым) ство­лом в со­вре­мен­ных сла­вян­ских и гер­ман­ских язы­ках можно, без со­мне­ния, вы­явить не­ко­то­рое сход­ство в по­сле­до­ва­тель­но­сти <strong>зву­ков</strong> в со­ста­ве кор­не­вой мор­фе­мы: <em>русск.</em> берёза, <em>укр.</em> бе­ре­за, <em>блр.</em> бя­ро­за, <em>нем.</em> (die) Birke, <em>англ.</em> (a) birch, <em>швед.</em> björk(en), <em>норв.</em> bjørk(en), <em>датск.</em> birk(en), также в при­бал­тий­ских язы­ках: <em>ли­товск.</em> béržas, <em>ла­тышск.</em> berzs.</p><p>Учёные-эти­мо­ло­ги <strong>воз­во­дят</strong> эти зву­ко­вые сход­ства и <strong>по­до­бия</strong> к ин­до­ев­ро­пей­ско­му слову *bher — «белый, свет­лый». На­име­но­ва­ние этого де­ре­ва свя­зы­ва­ет­ся эти­мо­ло­ги­че­ски со сло­ва­ми древ­них <strong>язы­ков</strong>: <em>готск.</em> вairhts — «ясный», <em>ин­до­ев­ро­пейск.</em> bhereg — «нечто бле­стя­щее, свет­лое, бе­ле­ю­щее».</p><p>Таким об­ра­зом, берёза по­лу­чи­ла в раз­лич­ных язы­ках своё на­зва­ние по цвету ство­ла как наи­бо­лее от­ли­чи­тель­но­му при­зна­ку (срав­ним с ту­рец­ким на­зва­ни­ем этого де­ре­ва: akagas — «белое де­ре­во»).</p><p><em>(По Ю. П. Со­ло­ду­бу)</em></p>
+
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="freebirdFormviewerViewNumberedItemContainer question-cont limiting-cont" role="listitem"
+       data-question-number="7" data-question-type="Plain">
+    <div class="m2">
+      <div class="freebirdFormviewerComponentsQuestionBaseRoot "
+           data-question-number="7"
+           data-question-id="7120"
+           data-format-id="1">
+        <div class="freebirdFormviewerComponentsQuestionBaseHeader">
+          <div class="freebirdFormviewerComponentsQuestionBaseTitleDescContainer">
+            <div class="freebirdFormviewerComponentsQuestionBaseTitle exportItemTitle freebirdCustomFont question-title">
+                  <div class="question-number d-titleNotFormatted">
+                    Задание 7 </div>
+                  <div class="question-title-cont">
+                          Са­мо­сто­я­тель­но под­бе­ри­те ввод­ное слово (ввод­ную кон­струк­цию), ко­то­рое(-ая) долж­но(-а) сто­ять на месте про­пус­ка во вто­ром пред­ло­же­нии тек­ста. За­пи­ши­те это(-у) ввод­ное слово (ввод­ную кон­струк­цию).
+                  </div>
+
+            </div>
+            <div class="freebirdFormviewerComponentsQuestionBaseDescription question-body-container">
+              <div class="more printer-hidden"><span></span></div>
+      <div class="question-message"></div>
+          <div class="question-message-more">
+                  
+          </div>
+            </div>
+          </div>
+        </div>
+  <div class="freebirdFormviewerComponentsQuestionTextRoot">
+    <div class="quantumWizTextinputPaperinputEl freebirdFormviewerComponentsQuestionTextShort freebirdFormviewerComponentsQuestionTextTextInput freebirdThemedInput modeLight">
+      <div class="quantumWizTextinputPaperinputMainContent exportContent">
+        <div class="hidden shadow-answer"></div>
+        <div class="quantumWizTextinputPaperinputContentArea exportContentArea">
+          <div class="quantumWizTextinputPaperinputInputArea">
+            <input type="text"
+                   enterkeyhint="next"
+                   class="quantumWizTextinputPaperinputInput exportInput required"
+                   autocomplete="off"
+                   spellcheck="false"
+                   autocorrect="off"
+                   writingsuggestions="false"
+                   autocapitalize="off"
+                   name="question7"/>
+            <div class="quantumWizTextinputPaperinputPlaceholder exportLabel">
+              Мой ответ
+            </div>
+          </div>
+          <div class="quantumWizTextinputPaperinputUnderline exportUnderline"></div>
+          <div jsname="XmnwAc"
+               class="quantumWizTextinputPaperinputFocusUnderline exportFocusUnderline"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="freebirdFormviewerComponentsQuestionBaseValidationError"
+       role="alert">
+    <div class="freebirdMaterialIconIconEl freebirdMaterialIconIconUpdatedM2 rm12">
+      <div class="freebirdMaterialIconIconImage freebirdMaterialIconIconM2Icon freebird-qp-icon-error-outline-red"></div>
+    </div>
+    <div class="answer-error-message">Это обязательный вопрос.</div>
+  </div>
+      </div>
+      <div class="question-notes hidden">
+          
+      </div>
+    </div>
+  </div>
+
+
+  <div class="freebirdFormviewerViewNumberedItemContainer question-cont limiting-cont" role="listitem"
+       data-question-number="8" data-question-type="TypeAll">
+    <div class="m2">
+      <div class="freebirdFormviewerComponentsQuestionBaseRoot "
+           data-question-number="8"
+           data-question-id="9789"
+           data-format-id="2">
+        <div class="freebirdFormviewerComponentsQuestionBaseHeader">
+          <div class="freebirdFormviewerComponentsQuestionBaseTitleDescContainer">
+            <div class="freebirdFormviewerComponentsQuestionBaseTitle exportItemTitle freebirdCustomFont question-title">
+                  <div class="question-number d-titleNotFormatted">
+                    Задание 8 </div>
+                  <div class="question-title-cont">
+                          В тексте выделено пять слов. Укажите варианты ответов, в которых лексическое значение выделенного слова соответствует его значению в данном тексте. Запишите номера ответов.
+                  </div>
+
+            </div>
+            <div class="freebirdFormviewerComponentsQuestionBaseDescription question-body-container">
+              <div class="more printer-hidden"><span></span></div>
+      <div class="question-message"><p>1) <strong>СЛОЖИТЬСЯ.</strong> Стать вполне зрелым в духовном и физическом отношении. Вполне сложившийся человек.</p><p>2) <strong>ЗВУК.</strong> Членораздельный элемент человеческой произносимой речи. Глухие и звонкие звуки.</p><p>3) <strong>ВОЗВОДИТЬ</strong> (что к чему). Устанавливать происхождение от чего-нибудь, относить начало, генезис чего-нибудь к чему-нибудь. Глаголицу возводят к греческому курсиву.</p><p>4) <strong>ПОДОБИЕ.</strong> В геометрии тождество формы при различии величины. Подобие двух треугольников.</p><p>5) <strong>ЯЗЫК.</strong> Система словесного выражения мыслей, обладающая определенным звуковым и грамматическим строем и служащая средством общения людей. Древние языки. Французский язык.</p></div>
+          <div class="question-message-more">
+                  
+          </div>
+            </div>
+          </div>
+        </div>
+  <div class="freebirdFormviewerComponentsQuestionTextRoot">
+    <div class="quantumWizTextinputPaperinputEl freebirdFormviewerComponentsQuestionTextShort freebirdFormviewerComponentsQuestionTextTextInput freebirdThemedInput modeLight">
+      <div class="quantumWizTextinputPaperinputMainContent exportContent">
+        <div class="hidden shadow-answer"></div>
+        <div class="quantumWizTextinputPaperinputContentArea exportContentArea">
+          <div class="quantumWizTextinputPaperinputInputArea">
+            <input type="text"
+                      inputmode="numeric"
+                      pattern="[0-9 ]*"
+                      oninput="this.value = this.value.replace(/[^\d ]+/g, '')"
+                   enterkeyhint="next"
+                   class="quantumWizTextinputPaperinputInput exportInput required"
+                   autocomplete="off"
+                   spellcheck="false"
+                   autocorrect="off"
+                   writingsuggestions="false"
+                   autocapitalize="off"
+                   name="question8"/>
+            <div class="quantumWizTextinputPaperinputPlaceholder exportLabel">
+              Мой ответ
+            </div>
+          </div>
+          <div class="quantumWizTextinputPaperinputUnderline exportUnderline"></div>
+          <div jsname="XmnwAc"
+               class="quantumWizTextinputPaperinputFocusUnderline exportFocusUnderline"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="freebirdFormviewerComponentsQuestionBaseValidationError"
+       role="alert">
+    <div class="freebirdMaterialIconIconEl freebirdMaterialIconIconUpdatedM2 rm12">
+      <div class="freebirdMaterialIconIconImage freebirdMaterialIconIconM2Icon freebird-qp-icon-error-outline-red"></div>
+    </div>
+    <div class="answer-error-message">Это обязательный вопрос.</div>
+  </div>
+      </div>
+      <div class="question-notes hidden">
+          
+      </div>
+    </div>
+  </div>
+
+
+  <div class="freebirdFormviewerViewNumberedItemContainer question-cont limiting-cont" role="listitem"
+       data-question-number="9" data-question-type="TypeAll">
+    <div class="m2">
+      <div class="freebirdFormviewerComponentsQuestionBaseRoot "
+           data-question-number="9"
+           data-question-id="11593"
+           data-format-id="3">
+        <div class="freebirdFormviewerComponentsQuestionBaseHeader">
+          <div class="freebirdFormviewerComponentsQuestionBaseTitleDescContainer">
+            <div class="freebirdFormviewerComponentsQuestionBaseTitle exportItemTitle freebirdCustomFont question-title">
+                  <div class="question-number d-titleNotFormatted">
+                    Задание 9 </div>
+                  <div class="question-title-cont">
+                          Укажите варианты ответов, в которых даны верные характеристики фрагмента текста. Запишите номера этих ответов.
+                  </div>
+
+            </div>
+            <div class="freebirdFormviewerComponentsQuestionBaseDescription question-body-container">
+              <div class="more printer-hidden"><span></span></div>
+      <div class="question-message"><p>1) Основной функционально-смысловой тип речи текста — рассуждение, поскольку в тексте исследуется определённое явление, раскрываются его внутренние признаки, наблюдается развитие авторской мысли.</p><p>2) Для эмоционального воздействия на читателя используются различные вводные слова (<em>так, без сомнения</em>).</p><p>3) Точность речи достигается путём включения в текст терминов — слов однозначных, строго определённых в своих значениях в пределах конкретной сферы употребления (<em>морфема, номинация, денотат</em>).</p><p>4) Текст относится к официально-деловому стилю речи: он лишён эмоциональности, авторское «я» в тексте отсутствует, материал излагается сжато.</p><p>5) Текст содержит грамматические особенности, характерные для письменной речи: в нём, например, активно используются отглагольные имена существительные (<em>наблюдение, наименование, название</em>).</p></div>
+          <div class="question-message-more">
+                  
+          </div>
+            </div>
+          </div>
+        </div>
+  <div class="freebirdFormviewerComponentsQuestionTextRoot">
+    <div class="quantumWizTextinputPaperinputEl freebirdFormviewerComponentsQuestionTextShort freebirdFormviewerComponentsQuestionTextTextInput freebirdThemedInput modeLight">
+      <div class="quantumWizTextinputPaperinputMainContent exportContent">
+        <div class="hidden shadow-answer"></div>
+        <div class="quantumWizTextinputPaperinputContentArea exportContentArea">
+          <div class="quantumWizTextinputPaperinputInputArea">
+            <input type="text"
+                      inputmode="numeric"
+                      pattern="[0-9 ]*"
+                      oninput="this.value = this.value.replace(/[^\d ]+/g, '')"
+                   enterkeyhint="next"
+                   class="quantumWizTextinputPaperinputInput exportInput required"
+                   autocomplete="off"
+                   spellcheck="false"
+                   autocorrect="off"
+                   writingsuggestions="false"
+                   autocapitalize="off"
+                   name="question9"/>
+            <div class="quantumWizTextinputPaperinputPlaceholder exportLabel">
+              Мой ответ
+            </div>
+          </div>
+          <div class="quantumWizTextinputPaperinputUnderline exportUnderline"></div>
+          <div jsname="XmnwAc"
+               class="quantumWizTextinputPaperinputFocusUnderline exportFocusUnderline"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="freebirdFormviewerComponentsQuestionBaseValidationError"
+       role="alert">
+    <div class="freebirdMaterialIconIconEl freebirdMaterialIconIconUpdatedM2 rm12">
+      <div class="freebirdMaterialIconIconImage freebirdMaterialIconIconM2Icon freebird-qp-icon-error-outline-red"></div>
+    </div>
+    <div class="answer-error-message">Это обязательный вопрос.</div>
+  </div>
+      </div>
+      <div class="question-notes hidden">
+          
+      </div>
+    </div>
+  </div>
+
+  <div class="freebirdFormviewerViewNumberedItemContainer extraTextBefore-cont" role="listitem"
+       data-question-numbers="10,11,12">
+    <div class="m2">
+      <div class="freebirdFormviewerComponentsQuestionBaseRoot "
+           data-question-number="10"
+           data-question-id="7134"
+           data-format-id="1"
+      >
+        <div class="freebirdFormviewerComponentsQuestionBaseHeader">
+          <div class="freebirdFormviewerComponentsQuestionBaseTitleDescContainer">
+            <div class="freebirdFormviewerComponentsQuestionBaseTitle exportItemTitle freebirdCustomFont">
+                  <p class="bigText-title">Прочитайте текст и выполните задания 10—12.</p>
+            </div>
+            <div class="freebirdFormviewerComponentsQuestionBaseDescription bigTextMessage">
+              <div class="more printer-hidden"><span></span></div>
+                        <p><em>Кор­ре­спон­дент.</em> Вы — рус­ский поэт, пи­шу­щий <strong> слож­ные</strong>, фи­ло­соф­ские стихи. Труд­но­до­ступ­ные не­под­го­тов­лен­но­му чи­та­те­лю. Я сей­час ста­нов­люсь на точку зре­ния <strong> мас­со­во­го</strong> чи­та­те­ля, ко­то­ро­му и во­об­ще не до сти­хов, а в эми­гра­ции — и по­дав­но.</p><p><em>И. А. Брод­ский.</em> Да, здесь боль­ше пи­шу­щих, чем чи­та­ю­щих.</p><p><em>Кор­ре­спон­дент.</em> Так вот, в этой <strong> об­ста­нов­ке</strong> чи­та­тель­ской инерт­но­сти, с одной сто­ро­ны, и оже­сточённой борь­бы за рус­ско­языч­но­го чи­та­те­ля — с дру­гой, вы одер­жи­ва­е­те одну бле­стя­щую по­бе­ду за дру­гой. Как вы сами это объ­яс­ня­е­те? Каков ме­ха­низм ва­ше­го успе­ха?</p><p><em>И. А. Брод­ский.</em> Ни­ка­ко­го осо­бен­но­го ме­ха­низ­ма нет. Про­сто, если это дей­стви­тель­но, так ска­зать, успех, то всё объ­яс­ня­ет­ся про­стым фак­том, а <…> тем, что мои со­чи­не­ния, ста­тьи, стихи пе­ча­та­ют­ся в ан­гло­языч­ной прес­се до­воль­но ши­ро­ко. И, ви­ди­мо, не ка­жут­ся не­по­нят­ны­ми. Мно­гое зна­чит хо­ро­ший пе­ре­вод. Мой учи­тель, поэт Давид Са­мой­лов, го­во­рил, что хо­ро­ший пе­ре­вод со­хра­ня­ет семь­де­сят про­цен­тов под­лин­ни­ка. У меня хо­ро­шие пе­ре­вод­чи­ки, и я сам часто <strong> по­мо­гаю</strong> им. Ко­неч­но, в любом, даже самом со­вер­шен­ном пе­ре­во­де, вещь те­ря­ет.</p><p><em>Кор­ре­спон­дент.</em> Есть во­об­ще поэты, не под­да­ю­щи­е­ся пе­ре­во­ду. Пуш­кин на­при­мер.</p><p><em>И. А. Брод­ский.</em> <strong> По­след­ний</strong> из пе­ре­во­дов «Ев­ге­ния Оне­ги­на», пе­ре­вод Джон­сто­на, — от­лич­ный.</p><p><em>Кор­ре­спон­дент.</em> В рифму?</p><p><em>И. А. Брод­ский.</em> Да ещё в какую! Его можно в мест­ной сред­ней школе пре­по­да­вать.</p><p><em>Кор­ре­спон­дент.</em> Кри­ти­ки счи­та­ют, что вы взо­рва­ли тра­ди­ци­он­ный, клас­си­че­ский рус­ский стих, лишив его ос­нов­но­го ат­ри­бу­та — стро­ки как «еди­ни­цы по­э­зии», и тем при­бли­зи­ли к прозе. Счи­та­е­те ли вы это мне­ние пра­виль­ным?</p><p><em>И. А. Брод­ский.</em> Ни­че­го я рус­ский стих не лишал и ни­че­го в нём не взры­вал. У каж­до­го че­ло­ве­ка своя дик­ция, и у меня, ви­ди­мо, тоже своя. Про при­бли­же­ние к прозе я ни­че­го ска­зать не могу; един­ствен­но, к чему я более или менее все­гда стре­мил­ся, это к ло­гич­но­сти — хотя бы чисто внеш­ней — по­э­ти­че­ской речи, к до­го­ва­ри­ва­нию вещей до конца.</p>
+
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="freebirdFormviewerViewNumberedItemContainer question-cont limiting-cont" role="listitem"
+       data-question-number="10" data-question-type="Plain">
+    <div class="m2">
+      <div class="freebirdFormviewerComponentsQuestionBaseRoot "
+           data-question-number="10"
+           data-question-id="7134"
+           data-format-id="1">
+        <div class="freebirdFormviewerComponentsQuestionBaseHeader">
+          <div class="freebirdFormviewerComponentsQuestionBaseTitleDescContainer">
+            <div class="freebirdFormviewerComponentsQuestionBaseTitle exportItemTitle freebirdCustomFont question-title">
+                  <div class="question-number d-titleNotFormatted">
+                    Задание 10 </div>
+                  <div class="question-title-cont">
+                          Са­мо­сто­я­тель­но под­бе­ри­те уточ­ня­ю­щую ча­сти­цу, ко­то­рая долж­на сто­ять на месте про­пус­ка в четвёртом (4) аб­за­це тек­ста. За­пи­ши­те эту ча­сти­цу.
+                  </div>
+
+            </div>
+            <div class="freebirdFormviewerComponentsQuestionBaseDescription question-body-container">
+              <div class="more printer-hidden"><span></span></div>
+      <div class="question-message"></div>
+          <div class="question-message-more">
+                  
+          </div>
+            </div>
+          </div>
+        </div>
+  <div class="freebirdFormviewerComponentsQuestionTextRoot">
+    <div class="quantumWizTextinputPaperinputEl freebirdFormviewerComponentsQuestionTextShort freebirdFormviewerComponentsQuestionTextTextInput freebirdThemedInput modeLight">
+      <div class="quantumWizTextinputPaperinputMainContent exportContent">
+        <div class="hidden shadow-answer"></div>
+        <div class="quantumWizTextinputPaperinputContentArea exportContentArea">
+          <div class="quantumWizTextinputPaperinputInputArea">
+            <input type="text"
+                   enterkeyhint="next"
+                   class="quantumWizTextinputPaperinputInput exportInput required"
+                   autocomplete="off"
+                   spellcheck="false"
+                   autocorrect="off"
+                   writingsuggestions="false"
+                   autocapitalize="off"
+                   name="question10"/>
+            <div class="quantumWizTextinputPaperinputPlaceholder exportLabel">
+              Мой ответ
+            </div>
+          </div>
+          <div class="quantumWizTextinputPaperinputUnderline exportUnderline"></div>
+          <div jsname="XmnwAc"
+               class="quantumWizTextinputPaperinputFocusUnderline exportFocusUnderline"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="freebirdFormviewerComponentsQuestionBaseValidationError"
+       role="alert">
+    <div class="freebirdMaterialIconIconEl freebirdMaterialIconIconUpdatedM2 rm12">
+      <div class="freebirdMaterialIconIconImage freebirdMaterialIconIconM2Icon freebird-qp-icon-error-outline-red"></div>
+    </div>
+    <div class="answer-error-message">Это обязательный вопрос.</div>
+  </div>
+      </div>
+      <div class="question-notes hidden">
+          
+      </div>
+    </div>
+  </div>
+
+
+  <div class="freebirdFormviewerViewNumberedItemContainer question-cont limiting-cont" role="listitem"
+       data-question-number="11" data-question-type="TypeAll">
+    <div class="m2">
+      <div class="freebirdFormviewerComponentsQuestionBaseRoot "
+           data-question-number="11"
+           data-question-id="9751"
+           data-format-id="2">
+        <div class="freebirdFormviewerComponentsQuestionBaseHeader">
+          <div class="freebirdFormviewerComponentsQuestionBaseTitleDescContainer">
+            <div class="freebirdFormviewerComponentsQuestionBaseTitle exportItemTitle freebirdCustomFont question-title">
+                  <div class="question-number d-titleNotFormatted">
+                    Задание 11 </div>
+                  <div class="question-title-cont">
+                          В тексте выделено пять слов. Укажите варианты ответов, в которых лексическое значение выделенного слова соответствует его значению в данном тексте. Запишите номера ответов.
+                  </div>
+
+            </div>
+            <div class="freebirdFormviewerComponentsQuestionBaseDescription question-body-container">
+              <div class="more printer-hidden"><span></span></div>
+      <div class="question-message"><p>1) <strong>СЛОЖНЫЙ.</strong> Представляющий затруднения для понимания, решения, осуществления и т. п.; трудный. <em>С. текст. Сложная проблема.</em></p><p>2) <strong>МАССОВЫЙ.</strong> Производимый в большом количестве, распространяющийся на множество, многих. <em>Массовое производство.</em></p><p>3) <strong>ОБСТАНОВКА.</strong> Положение, обстоятельства, условия существования кого-чего-нибудь. <em>Международная о. В обстановке гласности.</em></p><p>4) <strong>ПОМОГАТЬ.</strong> (1 и 2 л. не употр.), кому-чему. Дать желаемый результат, следствие, принести пользу. <em>Лечение помогло.</em></p><p>5) <strong>ПОСЛЕДНИЙ.</strong> Окончательный, бесповоротный. <em>Это моё последнее слово. Последнее решение.</em></p></div>
+          <div class="question-message-more">
+                  
+          </div>
+            </div>
+          </div>
+        </div>
+  <div class="freebirdFormviewerComponentsQuestionTextRoot">
+    <div class="quantumWizTextinputPaperinputEl freebirdFormviewerComponentsQuestionTextShort freebirdFormviewerComponentsQuestionTextTextInput freebirdThemedInput modeLight">
+      <div class="quantumWizTextinputPaperinputMainContent exportContent">
+        <div class="hidden shadow-answer"></div>
+        <div class="quantumWizTextinputPaperinputContentArea exportContentArea">
+          <div class="quantumWizTextinputPaperinputInputArea">
+            <input type="text"
+                      inputmode="numeric"
+                      pattern="[0-9 ]*"
+                      oninput="this.value = this.value.replace(/[^\d ]+/g, '')"
+                   enterkeyhint="next"
+                   class="quantumWizTextinputPaperinputInput exportInput required"
+                   autocomplete="off"
+                   spellcheck="false"
+                   autocorrect="off"
+                   writingsuggestions="false"
+                   autocapitalize="off"
+                   name="question11"/>
+            <div class="quantumWizTextinputPaperinputPlaceholder exportLabel">
+              Мой ответ
+            </div>
+          </div>
+          <div class="quantumWizTextinputPaperinputUnderline exportUnderline"></div>
+          <div jsname="XmnwAc"
+               class="quantumWizTextinputPaperinputFocusUnderline exportFocusUnderline"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="freebirdFormviewerComponentsQuestionBaseValidationError"
+       role="alert">
+    <div class="freebirdMaterialIconIconEl freebirdMaterialIconIconUpdatedM2 rm12">
+      <div class="freebirdMaterialIconIconImage freebirdMaterialIconIconM2Icon freebird-qp-icon-error-outline-red"></div>
+    </div>
+    <div class="answer-error-message">Это обязательный вопрос.</div>
+  </div>
+      </div>
+      <div class="question-notes hidden">
+          
+      </div>
+    </div>
+  </div>
+
+
+  <div class="freebirdFormviewerViewNumberedItemContainer question-cont limiting-cont" role="listitem"
+       data-question-number="12" data-question-type="TypeAll">
+    <div class="m2">
+      <div class="freebirdFormviewerComponentsQuestionBaseRoot "
+           data-question-number="12"
+           data-question-id="11614"
+           data-format-id="3">
+        <div class="freebirdFormviewerComponentsQuestionBaseHeader">
+          <div class="freebirdFormviewerComponentsQuestionBaseTitleDescContainer">
+            <div class="freebirdFormviewerComponentsQuestionBaseTitle exportItemTitle freebirdCustomFont question-title">
+                  <div class="question-number d-titleNotFormatted">
+                    Задание 12 </div>
+                  <div class="question-title-cont">
+                          Укажите варианты ответов, в которых даны верные характеристики фрагмента текста. Запишите номера ответов.
+                  </div>
+
+            </div>
+            <div class="freebirdFormviewerComponentsQuestionBaseDescription question-body-container">
+              <div class="more printer-hidden"><span></span></div>
+      <div class="question-message"><p>1) В репликах И. А. Бродского встречаются вводные слова и конструкции (<em>так сказать, видимо, конечно</em>), лексический повтор («<em>Ничего</em> я русский стих не лишал и <em>ничего</em> в нём не взрывал. У каждого человека <em>своя</em> дикция, и у меня, видимо, тоже <em>своя</em>»).</p><p>2) Текст интервью содержит стилевые особенности, характерные для разговорной речи: он отличается неофициальностью общения, спонтанностью, диалогичностью, ориентирован на неподготовленного читателя.</p><p>3) Текст относится к официально-деловому стилю, так как содержит термины (<em>эмиграции, прессе, подлинника</em>), собеседники используют нейтральную и специальную книжную лексику.</p><p>4) Речь собеседников различается: корреспондент использует эпитеты («<em>ожесточённая</em> борьба», «<em>блестящая</em> победа») и метафору (<em>взорвать стих</em>), Бродский же подчёркнуто ироничен (<em>Да, здесь больше пишущих, чем читающих; Да ещё в какую! Его можно в местной средней школе преподавать</em>).</p><p>5) В тексте интервью демонстрируется отстранённость собеседников, объективность излагаемой информации, что обеспечивается отсутствием слов в переносном значении, использованием фактов и числовых данных (<em>семьдесят процентов</em>).</p></div>
+          <div class="question-message-more">
+                  
+          </div>
+            </div>
+          </div>
+        </div>
+  <div class="freebirdFormviewerComponentsQuestionTextRoot">
+    <div class="quantumWizTextinputPaperinputEl freebirdFormviewerComponentsQuestionTextShort freebirdFormviewerComponentsQuestionTextTextInput freebirdThemedInput modeLight">
+      <div class="quantumWizTextinputPaperinputMainContent exportContent">
+        <div class="hidden shadow-answer"></div>
+        <div class="quantumWizTextinputPaperinputContentArea exportContentArea">
+          <div class="quantumWizTextinputPaperinputInputArea">
+            <input type="text"
+                      inputmode="numeric"
+                      pattern="[0-9 ]*"
+                      oninput="this.value = this.value.replace(/[^\d ]+/g, '')"
+                   enterkeyhint="next"
+                   class="quantumWizTextinputPaperinputInput exportInput required"
+                   autocomplete="off"
+                   spellcheck="false"
+                   autocorrect="off"
+                   writingsuggestions="false"
+                   autocapitalize="off"
+                   name="question12"/>
+            <div class="quantumWizTextinputPaperinputPlaceholder exportLabel">
+              Мой ответ
+            </div>
+          </div>
+          <div class="quantumWizTextinputPaperinputUnderline exportUnderline"></div>
+          <div jsname="XmnwAc"
+               class="quantumWizTextinputPaperinputFocusUnderline exportFocusUnderline"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="freebirdFormviewerComponentsQuestionBaseValidationError"
+       role="alert">
+    <div class="freebirdMaterialIconIconEl freebirdMaterialIconIconUpdatedM2 rm12">
+      <div class="freebirdMaterialIconIconImage freebirdMaterialIconIconM2Icon freebird-qp-icon-error-outline-red"></div>
+    </div>
+    <div class="answer-error-message">Это обязательный вопрос.</div>
+  </div>
+      </div>
+      <div class="question-notes hidden">
+          
+      </div>
+    </div>
+  </div>
+
+  <div class="freebirdFormviewerViewNumberedItemContainer extraTextBefore-cont" role="listitem"
+       data-question-numbers="13,14,15">
+    <div class="m2">
+      <div class="freebirdFormviewerComponentsQuestionBaseRoot "
+           data-question-number="13"
+           data-question-id="7130"
+           data-format-id="1"
+      >
+        <div class="freebirdFormviewerComponentsQuestionBaseHeader">
+          <div class="freebirdFormviewerComponentsQuestionBaseTitleDescContainer">
+            <div class="freebirdFormviewerComponentsQuestionBaseTitle exportItemTitle freebirdCustomFont">
+                  <p class="bigText-title">Прочитайте текст и выполните задания 13—15.</p>
+            </div>
+            <div class="freebirdFormviewerComponentsQuestionBaseDescription bigTextMessage">
+              <div class="more printer-hidden"><span></span></div>
+                        <p>В дан­ной ис­сле­до­ва­тель­ской ра­бо­те про­ве­де­но со­по­став­ле­ние языка сказ­ки «Бе­ло­снеж­ка» бра­тьев Гримм и «Сказ­ки о мёртвой ца­рев­не...» А. С. Пуш­ки­на: най­де­ны общие пра­ин­до­ев­ро­пей­ские <strong>корни</strong> в сло­вах, обо­зна­ча­ю­щих ос­но­вы че­ло­ве­че­ской жизни, на­при­мер се­мей­ные <strong>связи</strong>; об­на­ру­же­ны ис­то­риз­мы — слова, на­зы­ва­ю­щие пред­ме­ты или яв­ле­ния, по­мо­га­ю­щие ре­кон­стру­и­ро­вать ста­ри­ну; про­ана­ли­зи­ро­ва­ны эпи­те­ты, ме­та­фо­ры, срав­не­ния, ска­зоч­ные фор­му­лы, ярко вы­ра­жа­ю­щие ав­тор­ское от­но­ше­ние к ге­ро­ям и их по­ступ­кам. Сде­ла­ны вы­во­ды о том, что язы­ко­вые <strong>сред­ства</strong> пе­ре­да­ют как общ­ность, так и раз­ли­чие на­ро­дов в вос­при­я­тии окру­жа­ю­щей дей­стви­тель­но­сти. По­э­ти­че­ская форма ска­зок ри­су­ет на­род­ный идеал, об­ли­ча­ет зло, опре­де­ля­ет нрав­ствен­ные ори­ен­ти­ры на­ро­дов.</p><p>Со­по­став­ле­ние язы­ко­во­го ма­те­ри­а­ла поз­во­ли­ло рас­смот­реть про­бле­му зна­че­ния общих древ­них кор­ней в не­мец­ком и рус­ском язы­ках, от­ра­же­ния в лек­си­ке ис­то­ри­че­ской <strong>эпохи</strong> и на­род­но­го со­зна­ния для вы­яв­ле­ния оди­на­ко­вых и от­ли­чи­тель­ных черт язы­ко­вой кар­ти­ны мира обоих на­ро­дов. <strong>Ана­лиз</strong> ис­то­риз­мов поз­во­лил сде­лать вывод о том, что в Гер­ма­нии при­о­ри­тет­ны­ми яв­ля­лись труд, тор­гов­ля, а в Рос­сии боль­шое вни­ма­ние уде­ля­лось за­щи­те от внеш­них вра­гов: стро­и­лись в не­про­хо­ди­мых лесах до­ро­ги, а на них вы­став­ля­лись бо­га­тыр­ские за­ста­вы, охра­няв­шие от на­бе­гов ко­че­вых племён. Оче­вид­но, <...> по­это­му в не­мец­кой сказ­ке про­яв­ля­ет­ся боль­ше праг­ма­тиз­ма, а в рус­ской силь­нее ощу­ща­ет­ся ро­ман­ти­ка ду­шев­но­го по­дви­га.</p>
+
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="freebirdFormviewerViewNumberedItemContainer question-cont limiting-cont" role="listitem"
+       data-question-number="13" data-question-type="Plain">
+    <div class="m2">
+      <div class="freebirdFormviewerComponentsQuestionBaseRoot "
+           data-question-number="13"
+           data-question-id="7130"
+           data-format-id="1">
+        <div class="freebirdFormviewerComponentsQuestionBaseHeader">
+          <div class="freebirdFormviewerComponentsQuestionBaseTitleDescContainer">
+            <div class="freebirdFormviewerComponentsQuestionBaseTitle exportItemTitle freebirdCustomFont question-title">
+                  <div class="question-number d-titleNotFormatted">
+                    Задание 13 </div>
+                  <div class="question-title-cont">
+                          Са­мо­сто­я­тель­но под­бе­ри­те уточ­ня­ю­щую ча­сти­цу, ко­то­рая долж­на сто­ять на месте про­пус­ка в по­след­нем пред­ло­же­нии тек­ста. За­пи­ши­те эту ча­сти­цу.
+                  </div>
+
+            </div>
+            <div class="freebirdFormviewerComponentsQuestionBaseDescription question-body-container">
+              <div class="more printer-hidden"><span></span></div>
+      <div class="question-message"></div>
+          <div class="question-message-more">
+                  
+          </div>
+            </div>
+          </div>
+        </div>
+  <div class="freebirdFormviewerComponentsQuestionTextRoot">
+    <div class="quantumWizTextinputPaperinputEl freebirdFormviewerComponentsQuestionTextShort freebirdFormviewerComponentsQuestionTextTextInput freebirdThemedInput modeLight">
+      <div class="quantumWizTextinputPaperinputMainContent exportContent">
+        <div class="hidden shadow-answer"></div>
+        <div class="quantumWizTextinputPaperinputContentArea exportContentArea">
+          <div class="quantumWizTextinputPaperinputInputArea">
+            <input type="text"
+                   enterkeyhint="next"
+                   class="quantumWizTextinputPaperinputInput exportInput required"
+                   autocomplete="off"
+                   spellcheck="false"
+                   autocorrect="off"
+                   writingsuggestions="false"
+                   autocapitalize="off"
+                   name="question13"/>
+            <div class="quantumWizTextinputPaperinputPlaceholder exportLabel">
+              Мой ответ
+            </div>
+          </div>
+          <div class="quantumWizTextinputPaperinputUnderline exportUnderline"></div>
+          <div jsname="XmnwAc"
+               class="quantumWizTextinputPaperinputFocusUnderline exportFocusUnderline"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="freebirdFormviewerComponentsQuestionBaseValidationError"
+       role="alert">
+    <div class="freebirdMaterialIconIconEl freebirdMaterialIconIconUpdatedM2 rm12">
+      <div class="freebirdMaterialIconIconImage freebirdMaterialIconIconM2Icon freebird-qp-icon-error-outline-red"></div>
+    </div>
+    <div class="answer-error-message">Это обязательный вопрос.</div>
+  </div>
+      </div>
+      <div class="question-notes hidden">
+          
+      </div>
+    </div>
+  </div>
+
+
+  <div class="freebirdFormviewerViewNumberedItemContainer question-cont limiting-cont" role="listitem"
+       data-question-number="14" data-question-type="TypeAll">
+    <div class="m2">
+      <div class="freebirdFormviewerComponentsQuestionBaseRoot "
+           data-question-number="14"
+           data-question-id="9802"
+           data-format-id="2">
+        <div class="freebirdFormviewerComponentsQuestionBaseHeader">
+          <div class="freebirdFormviewerComponentsQuestionBaseTitleDescContainer">
+            <div class="freebirdFormviewerComponentsQuestionBaseTitle exportItemTitle freebirdCustomFont question-title">
+                  <div class="question-number d-titleNotFormatted">
+                    Задание 14 </div>
+                  <div class="question-title-cont">
+                          В тексте выделено пять слов. Укажите варианты ответов, в которых лексическое значение выделенного слова соответствует его значению в данном тексте. Запишите номера ответов.
+                  </div>
+
+            </div>
+            <div class="freebirdFormviewerComponentsQuestionBaseDescription question-body-container">
+              <div class="more printer-hidden"><span></span></div>
+      <div class="question-message"><p>1) <strong>КОРЕНЬ.</strong> Внутренняя, находящаяся в теле часть волоса, зуба, ногтя. Покраснеть до корней волос (очень сильно).</p><p>2) <strong>СВЯЗЬ.</strong> Тесное общение между кем-чем-н. Дружеская связь. Укреплять международные связи.. Причинная связь. Связь теории и практики.</p><p>3) <strong>СРЕДСТВО.</strong> Приём, способ действия для достижения чего-нибудь. Художественные средства. Простое средство.</p><p>4) <strong>ЭПОХА.</strong> Длительный промежуток времени, выделяемый по какому-нибудь характерному явлению, событию. Героические эпохи русской истории.</p><p>5) <strong>АНАЛИЗ.</strong> Определение состава вещества. Химический анализ крови.</p></div>
+          <div class="question-message-more">
+                  
+          </div>
+            </div>
+          </div>
+        </div>
+  <div class="freebirdFormviewerComponentsQuestionTextRoot">
+    <div class="quantumWizTextinputPaperinputEl freebirdFormviewerComponentsQuestionTextShort freebirdFormviewerComponentsQuestionTextTextInput freebirdThemedInput modeLight">
+      <div class="quantumWizTextinputPaperinputMainContent exportContent">
+        <div class="hidden shadow-answer"></div>
+        <div class="quantumWizTextinputPaperinputContentArea exportContentArea">
+          <div class="quantumWizTextinputPaperinputInputArea">
+            <input type="text"
+                      inputmode="numeric"
+                      pattern="[0-9 ]*"
+                      oninput="this.value = this.value.replace(/[^\d ]+/g, '')"
+                   enterkeyhint="next"
+                   class="quantumWizTextinputPaperinputInput exportInput required"
+                   autocomplete="off"
+                   spellcheck="false"
+                   autocorrect="off"
+                   writingsuggestions="false"
+                   autocapitalize="off"
+                   name="question14"/>
+            <div class="quantumWizTextinputPaperinputPlaceholder exportLabel">
+              Мой ответ
+            </div>
+          </div>
+          <div class="quantumWizTextinputPaperinputUnderline exportUnderline"></div>
+          <div jsname="XmnwAc"
+               class="quantumWizTextinputPaperinputFocusUnderline exportFocusUnderline"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="freebirdFormviewerComponentsQuestionBaseValidationError"
+       role="alert">
+    <div class="freebirdMaterialIconIconEl freebirdMaterialIconIconUpdatedM2 rm12">
+      <div class="freebirdMaterialIconIconImage freebirdMaterialIconIconM2Icon freebird-qp-icon-error-outline-red"></div>
+    </div>
+    <div class="answer-error-message">Это обязательный вопрос.</div>
+  </div>
+      </div>
+      <div class="question-notes hidden">
+          
+      </div>
+    </div>
+  </div>
+
+
+  <div class="freebirdFormviewerViewNumberedItemContainer question-cont limiting-cont" role="listitem"
+       data-question-number="15" data-question-type="TypeAll">
+    <div class="m2">
+      <div class="freebirdFormviewerComponentsQuestionBaseRoot "
+           data-question-number="15"
+           data-question-id="11659"
+           data-format-id="3">
+        <div class="freebirdFormviewerComponentsQuestionBaseHeader">
+          <div class="freebirdFormviewerComponentsQuestionBaseTitleDescContainer">
+            <div class="freebirdFormviewerComponentsQuestionBaseTitle exportItemTitle freebirdCustomFont question-title">
+                  <div class="question-number d-titleNotFormatted">
+                    Задание 15 </div>
+                  <div class="question-title-cont">
+                          Укажите варианты ответов, в которых даны верные характеристики фрагмента текста. Запишите номера этих ответов.
+                  </div>
+
+            </div>
+            <div class="freebirdFormviewerComponentsQuestionBaseDescription question-body-container">
+              <div class="more printer-hidden"><span></span></div>
+      <div class="question-message"><p>1) Стандартизованность языка, которым написан текст, проявляется в широком использовании единиц особой лексической группы — канцеляризмов.</p><p>2) Текст посвящён лингвистическим проблемам. Помимо терминов (<em>язык, праиндоевропейские корни, эпитеты, метафоры, сравнения, историзмы</em> и др.), используется общенаучная лексика (<em>проблема, сопоставление, основы, выводы</em> и др.). Разговорная лексика, жаргонизмы в тексте отсутствуют.</p><p>3) Выразительность текста обеспечивается синтаксическими средствами, среди которых ряды однородных членов предложения, вводные слова.</p><p>4) Текст представляет собой фрагмент очерка, так как сообщает о наблюдениях автора, который даёт оценку описываемым явлениям.</p><p>5) Текст обращён к злободневным политическим проблемам общества. Автор анализирует эти проблемы.</p></div>
+          <div class="question-message-more">
+                  
+          </div>
+            </div>
+          </div>
+        </div>
+  <div class="freebirdFormviewerComponentsQuestionTextRoot">
+    <div class="quantumWizTextinputPaperinputEl freebirdFormviewerComponentsQuestionTextShort freebirdFormviewerComponentsQuestionTextTextInput freebirdThemedInput modeLight">
+      <div class="quantumWizTextinputPaperinputMainContent exportContent">
+        <div class="hidden shadow-answer"></div>
+        <div class="quantumWizTextinputPaperinputContentArea exportContentArea">
+          <div class="quantumWizTextinputPaperinputInputArea">
+            <input type="text"
+                      inputmode="numeric"
+                      pattern="[0-9 ]*"
+                      oninput="this.value = this.value.replace(/[^\d ]+/g, '')"
+                   enterkeyhint="next"
+                   class="quantumWizTextinputPaperinputInput exportInput required"
+                   autocomplete="off"
+                   spellcheck="false"
+                   autocorrect="off"
+                   writingsuggestions="false"
+                   autocapitalize="off"
+                   name="question15"/>
+            <div class="quantumWizTextinputPaperinputPlaceholder exportLabel">
+              Мой ответ
+            </div>
+          </div>
+          <div class="quantumWizTextinputPaperinputUnderline exportUnderline"></div>
+          <div jsname="XmnwAc"
+               class="quantumWizTextinputPaperinputFocusUnderline exportFocusUnderline"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="freebirdFormviewerComponentsQuestionBaseValidationError"
+       role="alert">
+    <div class="freebirdMaterialIconIconEl freebirdMaterialIconIconUpdatedM2 rm12">
+      <div class="freebirdMaterialIconIconImage freebirdMaterialIconIconM2Icon freebird-qp-icon-error-outline-red"></div>
+    </div>
+    <div class="answer-error-message">Это обязательный вопрос.</div>
+  </div>
+      </div>
+      <div class="question-notes hidden">
+          
+      </div>
+    </div>
+  </div>
+
+
+  <div class="freebirdFormviewerViewNumberedItemContainer question-cont limiting-cont" role="listitem"
+       data-question-number="16" data-question-type="TypeAll">
+    <div class="m2">
+      <div class="freebirdFormviewerComponentsQuestionBaseRoot "
+           data-question-number="16"
+           data-question-id="94175"
+           data-format-id="4">
+        <div class="freebirdFormviewerComponentsQuestionBaseHeader">
+          <div class="freebirdFormviewerComponentsQuestionBaseTitleDescContainer">
+            <div class="freebirdFormviewerComponentsQuestionBaseTitle exportItemTitle freebirdCustomFont question-title">
+                  <div class="question-number d-titleFormatted">
+                    Задание 16 </div>
+                  <div class="question-title-cont">
+                      <p> Укажите варианты ответов, в которых ВЕРНО выделена буква, обозначающая ударный гласный звук. Запишите номера ответов.</p>
+                  </div>
+
+            </div>
+            <div class="freebirdFormviewerComponentsQuestionBaseDescription question-body-container">
+              <div class="more printer-hidden"><span></span></div>
+      <div class="question-message"><p>1) ворвалАсь</p><p>2) жАлюзи</p><p>3) облЕгчит</p><p>4) чЕрпать</p><p>5) досУха</p></div>
+          <div class="question-message-more">
+                  
+          </div>
+            </div>
+          </div>
+        </div>
+  <div class="freebirdFormviewerComponentsQuestionTextRoot">
+    <div class="quantumWizTextinputPaperinputEl freebirdFormviewerComponentsQuestionTextShort freebirdFormviewerComponentsQuestionTextTextInput freebirdThemedInput modeLight">
+      <div class="quantumWizTextinputPaperinputMainContent exportContent">
+        <div class="hidden shadow-answer"></div>
+        <div class="quantumWizTextinputPaperinputContentArea exportContentArea">
+          <div class="quantumWizTextinputPaperinputInputArea">
+            <input type="text"
+                      inputmode="numeric"
+                      pattern="[0-9 ]*"
+                      oninput="this.value = this.value.replace(/[^\d ]+/g, '')"
+                   enterkeyhint="next"
+                   class="quantumWizTextinputPaperinputInput exportInput required"
+                   autocomplete="off"
+                   spellcheck="false"
+                   autocorrect="off"
+                   writingsuggestions="false"
+                   autocapitalize="off"
+                   name="question16"/>
+            <div class="quantumWizTextinputPaperinputPlaceholder exportLabel">
+              Мой ответ
+            </div>
+          </div>
+          <div class="quantumWizTextinputPaperinputUnderline exportUnderline"></div>
+          <div jsname="XmnwAc"
+               class="quantumWizTextinputPaperinputFocusUnderline exportFocusUnderline"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="freebirdFormviewerComponentsQuestionBaseValidationError"
+       role="alert">
+    <div class="freebirdMaterialIconIconEl freebirdMaterialIconIconUpdatedM2 rm12">
+      <div class="freebirdMaterialIconIconImage freebirdMaterialIconIconM2Icon freebird-qp-icon-error-outline-red"></div>
+    </div>
+    <div class="answer-error-message">Это обязательный вопрос.</div>
+  </div>
+      </div>
+      <div class="question-notes hidden">
+          
+      </div>
+    </div>
+  </div>
+
+
+  <div class="freebirdFormviewerViewNumberedItemContainer question-cont limiting-cont" role="listitem"
+       data-question-number="17" data-question-type="TypeAll">
+    <div class="m2">
+      <div class="freebirdFormviewerComponentsQuestionBaseRoot "
+           data-question-number="17"
+           data-question-id="94214"
+           data-format-id="4">
+        <div class="freebirdFormviewerComponentsQuestionBaseHeader">
+          <div class="freebirdFormviewerComponentsQuestionBaseTitleDescContainer">
+            <div class="freebirdFormviewerComponentsQuestionBaseTitle exportItemTitle freebirdCustomFont question-title">
+                  <div class="question-number d-titleFormatted">
+                    Задание 17 </div>
+                  <div class="question-title-cont">
+                      <p> Укажите варианты ответов, в которых ВЕРНО выделена буква, обозначающая ударный гласный звук. Запишите номера ответов.</p>
+                  </div>
+
+            </div>
+            <div class="freebirdFormviewerComponentsQuestionBaseDescription question-body-container">
+              <div class="more printer-hidden"><span></span></div>
+      <div class="question-message"><p>1) воспринялА</p><p>2) занЯл</p><p>3) отрОчество</p><p>4) облЕгченный</p><p>5) бухгАлтеров </p></div>
+          <div class="question-message-more">
+                  
+          </div>
+            </div>
+          </div>
+        </div>
+  <div class="freebirdFormviewerComponentsQuestionTextRoot">
+    <div class="quantumWizTextinputPaperinputEl freebirdFormviewerComponentsQuestionTextShort freebirdFormviewerComponentsQuestionTextTextInput freebirdThemedInput modeLight">
+      <div class="quantumWizTextinputPaperinputMainContent exportContent">
+        <div class="hidden shadow-answer"></div>
+        <div class="quantumWizTextinputPaperinputContentArea exportContentArea">
+          <div class="quantumWizTextinputPaperinputInputArea">
+            <input type="text"
+                      inputmode="numeric"
+                      pattern="[0-9 ]*"
+                      oninput="this.value = this.value.replace(/[^\d ]+/g, '')"
+                   enterkeyhint="next"
+                   class="quantumWizTextinputPaperinputInput exportInput required"
+                   autocomplete="off"
+                   spellcheck="false"
+                   autocorrect="off"
+                   writingsuggestions="false"
+                   autocapitalize="off"
+                   name="question17"/>
+            <div class="quantumWizTextinputPaperinputPlaceholder exportLabel">
+              Мой ответ
+            </div>
+          </div>
+          <div class="quantumWizTextinputPaperinputUnderline exportUnderline"></div>
+          <div jsname="XmnwAc"
+               class="quantumWizTextinputPaperinputFocusUnderline exportFocusUnderline"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="freebirdFormviewerComponentsQuestionBaseValidationError"
+       role="alert">
+    <div class="freebirdMaterialIconIconEl freebirdMaterialIconIconUpdatedM2 rm12">
+      <div class="freebirdMaterialIconIconImage freebirdMaterialIconIconM2Icon freebird-qp-icon-error-outline-red"></div>
+    </div>
+    <div class="answer-error-message">Это обязательный вопрос.</div>
+  </div>
+      </div>
+      <div class="question-notes hidden">
+          
+      </div>
+    </div>
+  </div>
+
+
+  <div class="freebirdFormviewerViewNumberedItemContainer question-cont limiting-cont" role="listitem"
+       data-question-number="18" data-question-type="TypeAll">
+    <div class="m2">
+      <div class="freebirdFormviewerComponentsQuestionBaseRoot "
+           data-question-number="18"
+           data-question-id="94138"
+           data-format-id="4">
+        <div class="freebirdFormviewerComponentsQuestionBaseHeader">
+          <div class="freebirdFormviewerComponentsQuestionBaseTitleDescContainer">
+            <div class="freebirdFormviewerComponentsQuestionBaseTitle exportItemTitle freebirdCustomFont question-title">
+                  <div class="question-number d-titleFormatted">
+                    Задание 18 </div>
+                  <div class="question-title-cont">
+                      <p> Укажите варианты ответов, в которых ВЕРНО выделена буква, обозначающая ударный гласный звук. Запишите номера ответов.</p>
+                  </div>
+
+            </div>
+            <div class="freebirdFormviewerComponentsQuestionBaseDescription question-body-container">
+              <div class="more printer-hidden"><span></span></div>
+      <div class="question-message"><p>1) озлОбить</p><p>2) шАрфы</p><p>3) сверлИшь</p><p>4) прИняла</p><p>5) грАжданство</p></div>
+          <div class="question-message-more">
+                  
+          </div>
+            </div>
+          </div>
+        </div>
+  <div class="freebirdFormviewerComponentsQuestionTextRoot">
+    <div class="quantumWizTextinputPaperinputEl freebirdFormviewerComponentsQuestionTextShort freebirdFormviewerComponentsQuestionTextTextInput freebirdThemedInput modeLight">
+      <div class="quantumWizTextinputPaperinputMainContent exportContent">
+        <div class="hidden shadow-answer"></div>
+        <div class="quantumWizTextinputPaperinputContentArea exportContentArea">
+          <div class="quantumWizTextinputPaperinputInputArea">
+            <input type="text"
+                      inputmode="numeric"
+                      pattern="[0-9 ]*"
+                      oninput="this.value = this.value.replace(/[^\d ]+/g, '')"
+                   enterkeyhint="next"
+                   class="quantumWizTextinputPaperinputInput exportInput required"
+                   autocomplete="off"
+                   spellcheck="false"
+                   autocorrect="off"
+                   writingsuggestions="false"
+                   autocapitalize="off"
+                   name="question18"/>
+            <div class="quantumWizTextinputPaperinputPlaceholder exportLabel">
+              Мой ответ
+            </div>
+          </div>
+          <div class="quantumWizTextinputPaperinputUnderline exportUnderline"></div>
+          <div jsname="XmnwAc"
+               class="quantumWizTextinputPaperinputFocusUnderline exportFocusUnderline"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="freebirdFormviewerComponentsQuestionBaseValidationError"
+       role="alert">
+    <div class="freebirdMaterialIconIconEl freebirdMaterialIconIconUpdatedM2 rm12">
+      <div class="freebirdMaterialIconIconImage freebirdMaterialIconIconM2Icon freebird-qp-icon-error-outline-red"></div>
+    </div>
+    <div class="answer-error-message">Это обязательный вопрос.</div>
+  </div>
+      </div>
+      <div class="question-notes hidden">
+          
+      </div>
+    </div>
+  </div>
+
+
+  <div class="freebirdFormviewerViewNumberedItemContainer question-cont limiting-cont" role="listitem"
+       data-question-number="19" data-question-type="TypeAll">
+    <div class="m2">
+      <div class="freebirdFormviewerComponentsQuestionBaseRoot "
+           data-question-number="19"
+           data-question-id="5484"
+           data-format-id="4">
+        <div class="freebirdFormviewerComponentsQuestionBaseHeader">
+          <div class="freebirdFormviewerComponentsQuestionBaseTitleDescContainer">
+            <div class="freebirdFormviewerComponentsQuestionBaseTitle exportItemTitle freebirdCustomFont question-title">
+                  <div class="question-number d-titleNotFormatted">
+                    Задание 19 </div>
+                  <div class="question-title-cont">
+                          Укажите варианты ответов, в которых верно выделена буква, обозначающая ударный гласный звук. Запишите номера ответов.
+                  </div>
+
+            </div>
+            <div class="freebirdFormviewerComponentsQuestionBaseDescription question-body-container">
+              <div class="more printer-hidden"><span></span></div>
+      <div class="question-message">1) углУбленный<br>2) накренИтся<br>3) зАнятый<br>4) перелилА<br>5) тортОв</div>
+          <div class="question-message-more">
+                  
+          </div>
+            </div>
+          </div>
+        </div>
+  <div class="freebirdFormviewerComponentsQuestionTextRoot">
+    <div class="quantumWizTextinputPaperinputEl freebirdFormviewerComponentsQuestionTextShort freebirdFormviewerComponentsQuestionTextTextInput freebirdThemedInput modeLight">
+      <div class="quantumWizTextinputPaperinputMainContent exportContent">
+        <div class="hidden shadow-answer"></div>
+        <div class="quantumWizTextinputPaperinputContentArea exportContentArea">
+          <div class="quantumWizTextinputPaperinputInputArea">
+            <input type="text"
+                      inputmode="numeric"
+                      pattern="[0-9 ]*"
+                      oninput="this.value = this.value.replace(/[^\d ]+/g, '')"
+                   enterkeyhint="next"
+                   class="quantumWizTextinputPaperinputInput exportInput required"
+                   autocomplete="off"
+                   spellcheck="false"
+                   autocorrect="off"
+                   writingsuggestions="false"
+                   autocapitalize="off"
+                   name="question19"/>
+            <div class="quantumWizTextinputPaperinputPlaceholder exportLabel">
+              Мой ответ
+            </div>
+          </div>
+          <div class="quantumWizTextinputPaperinputUnderline exportUnderline"></div>
+          <div jsname="XmnwAc"
+               class="quantumWizTextinputPaperinputFocusUnderline exportFocusUnderline"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="freebirdFormviewerComponentsQuestionBaseValidationError"
+       role="alert">
+    <div class="freebirdMaterialIconIconEl freebirdMaterialIconIconUpdatedM2 rm12">
+      <div class="freebirdMaterialIconIconImage freebirdMaterialIconIconM2Icon freebird-qp-icon-error-outline-red"></div>
+    </div>
+    <div class="answer-error-message">Это обязательный вопрос.</div>
+  </div>
+      </div>
+      <div class="question-notes hidden">
+          
+      </div>
+    </div>
+  </div>
+
+
+  <div class="freebirdFormviewerViewNumberedItemContainer question-cont limiting-cont" role="listitem"
+       data-question-number="20" data-question-type="TypeAll">
+    <div class="m2">
+      <div class="freebirdFormviewerComponentsQuestionBaseRoot "
+           data-question-number="20"
+           data-question-id="94209"
+           data-format-id="4">
+        <div class="freebirdFormviewerComponentsQuestionBaseHeader">
+          <div class="freebirdFormviewerComponentsQuestionBaseTitleDescContainer">
+            <div class="freebirdFormviewerComponentsQuestionBaseTitle exportItemTitle freebirdCustomFont question-title">
+                  <div class="question-number d-titleFormatted">
+                    Задание 20 </div>
+                  <div class="question-title-cont">
+                      <p> Укажите варианты ответов, в которых ВЕРНО выделена буква, обозначающая ударный гласный звук. Запишите номера ответов.</p>
+                  </div>
+
+            </div>
+            <div class="freebirdFormviewerComponentsQuestionBaseDescription question-body-container">
+              <div class="more printer-hidden"><span></span></div>
+      <div class="question-message"><p>1) прибЫв</p><p>2) занЯтый</p><p>3) щемИт</p><p>4) тОрты</p><p>5) некрОлог </p></div>
+          <div class="question-message-more">
+                  
+          </div>
+            </div>
+          </div>
+        </div>
+  <div class="freebirdFormviewerComponentsQuestionTextRoot">
+    <div class="quantumWizTextinputPaperinputEl freebirdFormviewerComponentsQuestionTextShort freebirdFormviewerComponentsQuestionTextTextInput freebirdThemedInput modeLight">
+      <div class="quantumWizTextinputPaperinputMainContent exportContent">
+        <div class="hidden shadow-answer"></div>
+        <div class="quantumWizTextinputPaperinputContentArea exportContentArea">
+          <div class="quantumWizTextinputPaperinputInputArea">
+            <input type="text"
+                      inputmode="numeric"
+                      pattern="[0-9 ]*"
+                      oninput="this.value = this.value.replace(/[^\d ]+/g, '')"
+                   enterkeyhint="next"
+                   class="quantumWizTextinputPaperinputInput exportInput required"
+                   autocomplete="off"
+                   spellcheck="false"
+                   autocorrect="off"
+                   writingsuggestions="false"
+                   autocapitalize="off"
+                   name="question20"/>
+            <div class="quantumWizTextinputPaperinputPlaceholder exportLabel">
+              Мой ответ
+            </div>
+          </div>
+          <div class="quantumWizTextinputPaperinputUnderline exportUnderline"></div>
+          <div jsname="XmnwAc"
+               class="quantumWizTextinputPaperinputFocusUnderline exportFocusUnderline"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="freebirdFormviewerComponentsQuestionBaseValidationError"
+       role="alert">
+    <div class="freebirdMaterialIconIconEl freebirdMaterialIconIconUpdatedM2 rm12">
+      <div class="freebirdMaterialIconIconImage freebirdMaterialIconIconM2Icon freebird-qp-icon-error-outline-red"></div>
+    </div>
+    <div class="answer-error-message">Это обязательный вопрос.</div>
+  </div>
+      </div>
+      <div class="question-notes hidden">
+          
+      </div>
+    </div>
+  </div>
+          </div>
+          <input type="hidden" name="jsonReply" id="jsonReplyField"/>
+          <input type="hidden" name="accumulatedExecutionTime" id="accumulatedExecutionTime"/>
+          <input type="hidden" name="realStartTime" id="realStartTime"/>
+          <input type="hidden" name="timestamp" value="1785655637750"/>
+              <div class="freebirdFormviewerViewNavigationNavControls printer-hidden">
+                <div class="freebirdFormviewerViewNavigationButtonsAndProgress">
+                  <div class="freebirdFormviewerViewNavigationLeftButtons">
+                    <div role="button"
+                         id="commitButton"
+                         class=" appsMaterialWizButtonEl appsMaterialWizButtonPaperbuttonEl appsMaterialWizButtonPaperbuttonFilled freebirdFormviewerViewNavigationSubmitButton freebirdThemedFilledButtonM2 isUndragged isActive">
+                      <div class="appsMaterialWizButtonPaperbuttonRipple exportInk"></div>
+                      <div class="appsMaterialWizButtonPaperbuttonFocusOverlay exportOverlay"></div>
+                      <span class="appsMaterialWizButtonPaperbuttonContent exportButtonContent"><span
+                                class="appsMaterialWizButtonPaperbuttonLabel quantumWizButtonPaperbuttonLabel exportLabel">Отправить</span></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="/js/DebugHelper.js?b71d4958"></script>
+<script>
+    let sendMode = "onErrorOrManual";
+
+
+    const JS_MON = new JSMonitor({
+        watchButtonSelector: ".nextPageButton, .sendPageButton",
+        sendMode: sendMode,
+        tag: 
+            "tr3782963"
+,
+    }).install();
+
+    new SupportLogDialog(JS_MON)
+        .bindToButton(".debug-button");
+</script>
+
+<script>
+    const timeUnlimited = true;
+    let PRECEPT_POINT_DATA = {"questionPoints":[]};
+    let PRECEPT_POINT_CONTROLLER = null;
+
+    const CONTINUE = 0;
+    const REMAINING_TIME = undefined;
+
+    const PAGED = true;
+    const TEST_RESULT_ID = 3782963;
+    const CONTINUE_CANDIDATE = {
+        id: 0,
+        size: 20,
+        url: "",
+        workoutNum: "-1",
+        title: "Задания 1-4",
+        type: "test"
+    }
+
+    const params = {
+        id: 3782963,
+        showCta: false,
+        continueIdx: 0,
+        remaining: undefined,
+        candidate: CONTINUE_CANDIDATE,
+        myUrl: "/test/test51465/?tr=3782963",
+    }
+
+    $(() => {
+        window.TEST_PAGER = new PagedTest(params);
+    })
+
+    const TEST_ID = 51465;
+    const TYPE = "test";
+    const QUESTION_MODE = null;
+    const DISABLE_HINTS = false;
+</script>
+
+<script src="/js/test.js?69520bdf"></script>
+<script>
+    try {
+        LottieAnimator.prewarm(bUtil.isLandscape() ? LOTTIE_POSITIVE : LOTTIE_POSITIVE_PORTRAIT);
+    } catch (e) {
+    }
+</script>
+<script src="/js/testPreceptPointBehavior.js?53c81ec8"></script>
+
+
+<script src="/js/trumbowyg/trumbowyg.min.js?526cabba" crossorigin="anonymous"></script>
+<script src="/js/trumbowyg/trumbowyg.colors.min.js?1429d31b" crossorigin="anonymous"></script>
+<script src="/js/trumbowyg/trumbowyg.history.min.js?53715841" crossorigin="anonymous"></script>
+<script src="/js/trumbowyg/trumbowyg.cleanpaste.js?e4202e18"></script>
+<script src="/js/trumbowyg/trumbowyg.drag-buttons.js?9ad0ae9f"></script>
+<script src="/js/trumbowyg/trumbowyg.colorButtons.js?a165e5e6"></script>
+<script src="/js/trumbowyg/trumbowyg.underlines.js?71b4d586"></script>
+<div id="customCombobox" class="custom-combobox hidden">
+</div>
+<p class="noMargin debug hidden"></p>
+</body>
+</html>

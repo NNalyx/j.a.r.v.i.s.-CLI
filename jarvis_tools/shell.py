@@ -6,20 +6,16 @@ from typing import Any, Dict, List
 from jarvis_core.types import ToolResult
 
 
-def run_cmd(command: str) -> ToolResult:
-    """Выполнить команду в PowerShell или CMD с автоопределением оболочки
+def run_cmd(command: str, cwd: str = "") -> ToolResult:
+    """Выполнить команду в системной оболочке.
+
+    Windows: PowerShell/CMD с автоопределением.
+    macOS/Linux: bash/sh.
 
     Примеры использования:
-    - Открыть сайт: Start-Process "https://youtube.com"
-    - Открыть сайт (CMD): start https://youtube.com
-    - Открыть файл в блокноте: notepad "C:\\path\\file.txt"
-    - Открыть папку: explorer "C:\\Users\\Public"
-    - Запустить приложение: Start-Process chrome
-    - Закрыть процесс: Stop-Process -Name notepad
-    - Получить информацию: Get-Process, Get-Service, Get-ChildItem
-
-    По умолчанию предпочитает PowerShell, но умеет автоматически
-    переключаться на CMD для классических команд Windows.
+    - Открыть сайт: Start-Process "https://youtube.com" (Win) / open "https://youtube.com" (Mac)
+    - Открыть файл: notepad "C:\\path\\file.txt" (Win) / open "~/file.txt" (Mac)
+    - Получить информацию: Get-Process (Win) / ps aux (Mac)
     """
     try:
         import subprocess
@@ -33,6 +29,45 @@ def run_cmd(command: str) -> ToolResult:
 
         env = os.environ.copy()
         env['PYTHONUTF8'] = '1'
+
+        workdir = None
+        if str(cwd or "").strip():
+            workdir = os.path.expanduser(cwd)
+            if not os.path.isdir(workdir):
+                return ToolResult(False, None, f"Working directory does not exist: {workdir}")
+
+        # macOS / Linux: выполняем через bash, без PowerShell/CMD
+        if sys.platform == "darwin" or os.name != "nt":
+            shell_bin = shutil.which("bash") or shutil.which("zsh") or shutil.which("sh") or "/bin/bash"
+            shell_args = [shell_bin]
+            # Без pipefail команда `curl ... | head` может вернуть код 0 от head,
+            # даже если curl завершился с ошибкой. Это вводит агента в заблуждение.
+            if os.path.basename(shell_bin) in {"bash", "zsh"}:
+                shell_args.extend(["-o", "pipefail"])
+            shell_args.extend(["-c", raw_command])
+            result = subprocess.run(
+                shell_args,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+                env=env,
+                cwd=workdir,
+            )
+            return ToolResult(
+                success=result.returncode == 0,
+                data={
+                    "command": raw_command,
+                    "shell": shell_bin,
+                    "cwd": workdir or os.getcwd(),
+                    "stdout": (result.stdout or "")[:5000],
+                    "stderr": (result.stderr or "")[:1000],
+                    "returncode": result.returncode,
+                },
+                error=(result.stderr or result.stdout or f"Command exited with code {result.returncode}")[:500]
+                if result.returncode != 0 else None,
+            )
 
         def run_in_powershell(cmd: str):
             ps_command = (
@@ -48,7 +83,8 @@ def run_cmd(command: str) -> ToolResult:
                 encoding='utf-8',
                 errors='replace',
                 timeout=30,
-                env=env
+                env=env,
+                cwd=workdir,
             )
 
         def run_in_cmd(cmd: str):
@@ -56,7 +92,8 @@ def run_cmd(command: str) -> ToolResult:
                 ["cmd.exe", "/d", "/s", "/c", cmd],
                 capture_output=True,
                 timeout=30,
-                env=env
+                env=env,
+                cwd=workdir,
             )
 
         def decode_cmd_output(raw_value: Any) -> str:
@@ -186,12 +223,14 @@ def run_cmd(command: str) -> ToolResult:
                 data={
                     "command": raw_command,
                     "shell": failed_attempt.get("shell"),
+                    "cwd": workdir or os.getcwd(),
                     "stdout": failed_attempt.get("stdout", ""),
                     "stderr": failed_attempt.get("stderr", ""),
                     "returncode": failed_attempt.get("returncode"),
                     "attempts": attempts
                 },
-                error=(last_error or "Command execution failed")[:500]
+                error=(last_error or failed_attempt.get("stderr") or failed_attempt.get("stdout")
+                       or f"Command exited with code {failed_attempt.get('returncode')}")[:500]
             )
 
         return ToolResult(
@@ -199,6 +238,7 @@ def run_cmd(command: str) -> ToolResult:
             data={
                 "command": raw_command,
                 "shell": shell_used,
+                "cwd": workdir or os.getcwd(),
                 "stdout": (result.stdout or "")[:5000],
                 "stderr": (result.stderr or "")[:1000],
                 "returncode": result.returncode,
@@ -247,4 +287,3 @@ def run_python(code: str) -> ToolResult:
         return ToolResult(False, None, "Execution timeout (30 sec)")
     except Exception as e:
         return ToolResult(False, None, f"Execution error: {str(e)}")
-

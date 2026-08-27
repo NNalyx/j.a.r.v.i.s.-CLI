@@ -3,6 +3,7 @@ fastapi
 uvicorn[standard]
 requests
 pywebview
+playwright
 
 # --- Data / Images ---
 Pillow
@@ -25,6 +26,10 @@ silero
 # --- TTS ---
 numpy
 supertonic
+
+# --- MLX (macOS Apple Silicon only) ---
+mlx-vlm
+mlx-lm
 
 # --- Telegram ---
 pyTelegramBotAPI

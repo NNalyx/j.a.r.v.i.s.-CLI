@@ -1,12 +1,40 @@
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from jarvis_mlx import IS_MLX_AVAILABLE
+from jarvis_mlx.discovery import discover_models, find_single_model, prompt_for_model_path
+
+
+def find_mtplx_executable():
+    """Найти исполняемый файл mtplx (venv или PATH)."""
+    path = shutil.which("mtplx")
+    if path:
+        return path
+    venv_path = os.path.join(sys.prefix, "bin", "mtplx")
+    if os.path.exists(venv_path):
+        return venv_path
+    return "mtplx"
+
+
+def find_optiq_executable():
+    """Найти исполняемый файл optiq (venv или PATH)."""
+    path = shutil.which("optiq")
+    if path:
+        return path
+    venv_path = os.path.join(sys.prefix, "bin", "optiq")
+    if os.path.exists(venv_path):
+        return venv_path
+    return "optiq"
+
 # Общий конфиг рядом с исполняемым файлом проекта
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_FILE = BASE_DIR / "jarvis_config.json"
+
+_IS_DARWIN = sys.platform == "darwin"
 
 DEFAULT_LLAMA_SERVER_PATHS = [
     os.path.join(BASE_DIR, "models", "llama-server.exe"),
@@ -15,6 +43,12 @@ DEFAULT_LLAMA_SERVER_PATHS = [
     r"C:\llama_server_new\llama-server.exe",
     r"C:\llama.cpp\llama-server.exe",
     r".\llama-server.exe",
+]
+
+DEFAULT_MLX_MODEL_ROOTS = [
+    os.path.join(Path.home(), ".mlx_models"),
+    os.path.join(Path.home(), "models"),
+    os.path.join(Path.home(), "MLXModels"),
 ]
 
 DEFAULT_VOSK_SMALL_PATHS = [
@@ -117,8 +151,10 @@ def get_valid_path(prompt_text, default_path="", allow_empty=False):
             print("⚠️ Путь не может быть пустым.")
             continue
         
-        # Нормализация пути (замена обратных слешей и раскрытие ~)
-        path = os.path.abspath(os.path.expanduser(path)).replace('/', '\\')
+        # Нормализация пути (раскрытие ~)
+        path = os.path.abspath(os.path.expanduser(path))
+        if sys.platform == "win32":
+            path = path.replace('/', '\\')
         
         if os.path.exists(path):
             return path
@@ -138,6 +174,92 @@ def get_valid_int(prompt_text, default_val):
         except ValueError:
             print("⚠️ Введите корректное целое число.")
 
+def setup_mlx_wizard():
+    """Мастер настройки MLX-пресета для macOS."""
+    print("\n" + "="*70)
+    print(" 🍎 НАСТРОЙКА MLX ПРЕСЕТА (macOS)")
+    print("="*70)
+
+    preset_name = input("\nВведите название для этого пресета (например, 'Qwen-MLX-Vision')\n[MLX Default]\n> ").strip()
+    if not preset_name:
+        preset_name = "MLX Default"
+
+    # Автообнаружение локальных моделей
+    found_models = discover_models()
+    model_path = ""
+    if len(found_models) == 1:
+        print(f"✅ Найдена локальная модель: {found_models[0]}")
+        if ask_yes_no("Использовать её?", default=True):
+            model_path = str(found_models[0])
+    elif len(found_models) > 1:
+        print("\nНайдено несколько локальных моделей:")
+        for i, m in enumerate(found_models, 1):
+            print(f"  {i}. {m}")
+        print("  0. Указать путь вручную / скачать с HuggingFace")
+        choice = get_valid_int("Выберите модель", 0)
+        if 1 <= choice <= len(found_models):
+            model_path = str(found_models[choice - 1])
+    else:
+        print("⚠️ Локальные MLX модели не найдены.")
+
+    if not model_path:
+        if ask_yes_no("Скачать модель с HuggingFace?", default=True):
+            from jarvis_mlx.downloader import default_cli_progress, download_model
+            repo_id = input("Введите HuggingFace repo_id (например, mlx-community/Qwen2-VL-7B-Instruct-mlx):\n> ").strip()
+            if not repo_id:
+                print("⚠️ repo_id не указан.")
+                return setup_mlx_wizard()
+            try:
+                print(f"\n⬇️ Начинаю загрузку {repo_id}...")
+                model_path = download_model(repo_id, progress_callback=default_cli_progress)
+                print(f"\n✅ Модель сохранена: {model_path}")
+            except Exception as exc:
+                print(f"\n❌ Ошибка загрузки: {exc}")
+                if ask_yes_no("Указать путь к локальной модели вручную?", default=True):
+                    model_path = prompt_for_model_path()
+                else:
+                    raise
+        else:
+            model_path = prompt_for_model_path()
+
+    temperature = get_valid_float("Temperature (0.0 - 2.0)", 0.7)
+    max_tokens = get_valid_int("Максимум токенов для генерации", 512)
+    port = get_valid_int("Порт для MLX-сервера", 8080)
+
+    return {
+        "name": preset_name,
+        "backend": "mlx-vlm",
+        "model_path": normalize_path(model_path),
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "port": port,
+    }
+
+
+def get_valid_float(prompt_text, default_val):
+    while True:
+        val = input(f"{prompt_text} [{default_val}]\n> ").strip()
+        if not val:
+            return default_val
+        try:
+            return float(val)
+        except ValueError:
+            print("⚠️ Введите корректное число.")
+
+
+def ask_yes_no(prompt_text: str, default: bool = False) -> bool:
+    default_str = "Y/n" if default else "y/N"
+    while True:
+        val = input(f"{prompt_text} [{default_str}]: ").strip().lower()
+        if not val:
+            return default
+        if val in ("y", "yes", "да"):
+            return True
+        if val in ("n", "no", "нет"):
+            return False
+        print("⚠️ Введите y или n.")
+
+
 def presets_to_runtime(config: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     """Преобразует jarvis_config.json в runtime-пресеты для jarvis_cli_gui."""
     if not config:
@@ -146,12 +268,145 @@ def presets_to_runtime(config: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, 
     presets: Dict[str, Dict[str, Any]] = {}
     for i, preset in enumerate(config.get("presets", [])):
         key = f"preset_{i}"
+        backend = preset.get("backend", "llama-server")
+
+        if backend == "mlx-vlm":
+            model_path = preset["model_path"]
+            port = int(preset.get("port", 8080))
+            args: List[str] = [
+                sys.executable,
+                "-m",
+                "jarvis_mlx.server",
+                "--model", model_path,
+                "--port", str(port),
+                "--host", "127.0.0.1",
+            ]
+            if preset.get("temperature") is not None:
+                args.extend(["--temp", str(preset["temperature"])])
+            if preset.get("max_tokens") is not None:
+                args.extend(["--max-tokens", str(preset["max_tokens"])])
+
+            command = " ".join(f'"{arg}"' if " " in arg else arg for arg in args)
+            presets[key] = {
+                "label": preset["name"],
+                "description": f"MLX backend | Порт: {port}",
+                "supports_images": True,
+                "cwd": str(BASE_DIR),
+                "args": args,
+                "command": command,
+                "config_index": i,
+                "backend": backend,
+                "port": port,
+                "context_size": int(preset.get("context_size", 32768)),
+                "max_tokens": int(preset.get("max_tokens", 512)),
+                "temperature": float(preset.get("temperature", 0.7)),
+            }
+            continue
+
+        if backend == "mlx-optiq":
+            model_path = preset["model_path"]
+            port = int(preset.get("port", 8080))
+            args = [
+                find_optiq_executable(),
+                "serve",
+                "--model", model_path,
+                "--port", str(port),
+                "--host", "127.0.0.1",
+                "--max-concurrent", str(int(preset.get("max_concurrent", 4))),
+                "--no-auth",
+            ]
+            if preset.get("temperature") is not None:
+                args.extend(["--temp", str(float(preset["temperature"]))])
+            if preset.get("max_tokens") is not None:
+                args.extend(["--max-tokens", str(int(preset["max_tokens"]))])
+            if preset.get("context_size"):
+                # OptiQ имеет нативный --max-context; mlx_lm.server --max-seq-length не понимает.
+                args.extend(["--max-context", str(int(preset["context_size"]))])
+            # OptiQ/MLX performance options
+            if preset.get("kv_bits") in (4, 8):
+                args.extend(["--kv-bits", str(int(preset["kv_bits"]))])
+                if preset.get("kv_group_size") is not None:
+                    args.extend(["--kv-group-size", str(int(preset["kv_group_size"]))])
+                if preset.get("quantized_kv_start") is not None:
+                    args.extend(["--quantized-kv-start", str(int(preset["quantized_kv_start"]))])
+            elif preset.get("kv_config"):
+                args.extend(["--kv-config", str(preset["kv_config"])])
+            if preset.get("prefill_step_size") is not None:
+                args.extend(["--prefill-step-size", str(int(preset["prefill_step_size"]))])
+            if preset.get("prompt_cache_size") is not None:
+                args.extend(["--prompt-cache-size", str(int(preset["prompt_cache_size"]))])
+            if preset.get("prompt_cache_bytes") is not None:
+                args.extend(["--prompt-cache-bytes", str(int(preset["prompt_cache_bytes"]))])
+            if preset.get("pipeline"):
+                args.append("--pipeline")
+            if preset.get("mtp_enabled"):
+                args.append("--mtp")
+                if preset.get("mtp_depth") is not None:
+                    args.extend(["--mtp-depth", str(int(preset["mtp_depth"]))])
+            command = " ".join(f'"{arg}"' if " " in arg else arg for arg in args)
+            presets[key] = {
+                "label": preset["name"],
+                "description": f"MLX-OptiQ backend | Порт: {port}",
+                "supports_images": False,
+                "cwd": str(BASE_DIR),
+                "args": args,
+                "command": command,
+                "config_index": i,
+                "backend": backend,
+                "port": port,
+                "context_size": int(preset.get("context_size", 32768)),
+                "max_tokens": int(preset.get("max_tokens", 8192)),
+                "temperature": float(preset.get("temperature", 0.6)),
+            }
+            continue
+
+        if backend == "mtplx":
+            model_path = preset["model_path"]
+            port = int(preset.get("port", 8080))
+            args = [
+                find_mtplx_executable(),
+                "serve",
+                "--model", model_path,
+                "--port", str(port),
+                "--host", "127.0.0.1",
+                "--profile", "sustained",
+                "--unsafe-force-unverified",
+                "--yes",
+                "--no-stats-footer",
+            ]
+            # MTPLX v0.1.x управляет размером контекста через профиль (sustained
+            # для длинного контекста); отдельного флага --context-window нет.
+            if preset.get("max_tokens"):
+                args.extend(["--max-tokens", str(int(preset["max_tokens"]))])
+            if preset.get("temperature") is not None:
+                args.extend(["--default-temperature", str(float(preset["temperature"]))])
+            if preset.get("mtp_enabled") and preset.get("mtp_n_max"):
+                args.extend(["--depth", str(int(preset["mtp_n_max"]))])
+            else:
+                args.append("--no-mtp")
+            command = " ".join(f'"{arg}"' if " " in arg else arg for arg in args)
+            presets[key] = {
+                "label": preset["name"],
+                "description": f"MTPLX backend | Порт: {port}",
+                "supports_images": False,
+                "cwd": str(BASE_DIR),
+                "args": args,
+                "command": command,
+                "config_index": i,
+                "backend": backend,
+                "port": port,
+                "context_size": int(preset.get("context_size", 32768)),
+                "max_tokens": int(preset.get("max_tokens", 8192)),
+                "temperature": float(preset.get("temperature", 0.6)),
+            }
+            continue
+
         llama_server_path = preset.get("llama_server_path", "")
         try:
             llama_server_path = resolve_llama_server_executable(llama_server_path)
         except ValueError:
             llama_server_path = normalize_path(llama_server_path)
-        args: List[str] = [
+        args = [
             llama_server_path,
             "-m", preset["model_path"],
             "-c", str(preset["context_size"]),
@@ -161,12 +416,23 @@ def presets_to_runtime(config: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, 
         ]
         if preset.get("mmproj_path"):
             args.extend(["--mmproj", preset["mmproj_path"]])
-        if preset.get("mtp_path"):
+        if preset.get("mtp_enabled") and not preset.get("mtp_path"):
+            # Встроенный MTP (Qwen3.6 и аналогичные): draft-модель не нужна
+            args.extend([
+                "--spec-type", "draft-mtp",
+                "--spec-draft-n-max", str(int(preset.get("mtp_n_max", 2))),
+            ])
+        elif preset.get("mtp_path"):
             args.extend([
                 "--model-draft", preset["mtp_path"],
                 "--spec-type", "draft-mtp",
-                "--spec-draft-n-max", "2",
+                "--spec-draft-n-max", str(int(preset.get("mtp_n_max", 2))),
             ])
+        if preset.get("chat_template_file"):
+            args.extend(["--chat-template-file", preset["chat_template_file"]])
+        extra_args = preset.get("extra_args")
+        if isinstance(extra_args, list):
+            args.extend([str(arg) for arg in extra_args if arg is not None])
 
         # command — строковое представление для совместимости и отладки
         command = " ".join(f'"{arg}"' if " " in arg else arg for arg in args)
@@ -179,6 +445,8 @@ def presets_to_runtime(config: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, 
             "args": args,
             "command": command,
             "config_index": i,
+            "backend": backend,
+            "port": int(preset.get("port", 8080)),
         }
     return presets
 
@@ -216,7 +484,11 @@ def normalize_path(path: str, allow_empty: bool = False) -> str:
         if allow_empty:
             return ""
         raise ValueError("Путь не может быть пустым")
-    return os.path.abspath(os.path.expanduser(cleaned)).replace("/", "\\")
+    normalized = os.path.abspath(os.path.expanduser(cleaned))
+    # На Windows используем обратные слеши, на остальных платформах оставляем как есть
+    if sys.platform == "win32":
+        return normalized.replace("/", "\\")
+    return normalized
 
 
 def needs_setup() -> bool:
@@ -227,27 +499,115 @@ def needs_setup() -> bool:
 def preset_to_public(preset: Dict[str, Any], index: int, active_index: int) -> Dict[str, Any]:
     mmproj_path = preset.get("mmproj_path") or ""
     mtp_path = preset.get("mtp_path") or ""
-    return {
+    mtp_enabled = bool(preset.get("mtp_enabled"))
+    backend = preset.get("backend", "llama-server")
+
+    base = {
         "index": index,
         "key": f"preset_{index}",
         "name": preset.get("name") or f"Preset {index + 1}",
-        "llama_server_path": preset.get("llama_server_path", ""),
+        "backend": backend,
         "model_path": preset.get("model_path", ""),
-        "mmproj_path": mmproj_path,
-        "mtp_path": mtp_path,
-        "context_size": int(preset.get("context_size", 18432)),
-        "ngl": int(preset.get("ngl", 99)),
+        "chat_template_file": preset.get("chat_template_file", ""),
         "port": int(preset.get("port", 8080)),
-        "supports_images": bool(mmproj_path),
         "selected": index == active_index,
         "enabled_tools": preset.get("enabled_tools"),
+        "system_prompt_mode": preset.get("system_prompt_mode", "full"),
+    }
+
+    if backend == "mlx-vlm":
+        base.update({
+            "llama_server_path": "",
+            "mmproj_path": "",
+            "mtp_path": "",
+            "context_size": 0,
+            "ngl": 0,
+            "supports_images": True,
+            "temperature": float(preset.get("temperature", 0.7)),
+            "max_tokens": int(preset.get("max_tokens", 512)),
+            "description": (
+                f"MLX backend | Порт: {preset.get('port', 8080)} | "
+                f"temp: {preset.get('temperature', 0.7)} | "
+                f"max_tokens: {preset.get('max_tokens', 512)}"
+            ),
+        })
+        return base
+
+    if backend == "mlx-optiq":
+        base.update({
+            "llama_server_path": "",
+            "mmproj_path": "",
+            "mtp_path": "",
+            "context_size": int(preset.get("context_size", 32768)),
+            "ngl": 0,
+            "supports_images": False,
+            "temperature": float(preset.get("temperature", 0.6)),
+            "max_tokens": int(preset.get("max_tokens", 8192)),
+            "max_concurrent": int(preset.get("max_concurrent", 4)),
+            "kv_bits": preset.get("kv_bits"),
+            "kv_group_size": int(preset.get("kv_group_size", 64)),
+            "quantized_kv_start": int(preset.get("quantized_kv_start", 0)),
+            "kv_config": preset.get("kv_config", ""),
+            "prefill_step_size": int(preset.get("prefill_step_size", 2048)),
+            "prompt_cache_size": preset.get("prompt_cache_size"),
+            "prompt_cache_bytes": preset.get("prompt_cache_bytes"),
+            "pipeline": bool(preset.get("pipeline", False)),
+            "mtp_enabled": bool(preset.get("mtp_enabled", False)),
+            "mtp_depth": int(preset.get("mtp_depth", 2)),
+            "description": (
+                f"MLX-OptiQ backend | Порт: {preset.get('port', 8080)} | "
+                f"ctx: {preset.get('context_size', 32768)} | "
+                f"temp: {preset.get('temperature', 0.6)} | "
+                f"max: {preset.get('max_tokens', 8192)}"
+            ),
+        })
+        return base
+
+    if backend == "mtplx":
+        mtp_enabled = bool(preset.get("mtp_enabled", True))
+        base.update({
+            "llama_server_path": "",
+            "mmproj_path": "",
+            "mtp_path": "",
+            "context_size": int(preset.get("context_size", 32768)),
+            "ngl": 0,
+            "supports_images": False,
+            "temperature": float(preset.get("temperature", 0.6)),
+            "max_tokens": int(preset.get("max_tokens", 8192)),
+            "mtp_enabled": mtp_enabled,
+            "mtp_n_max": int(preset.get("mtp_n_max", 3)),
+            "description": (
+                f"MTPLX backend | Порт: {preset.get('port', 8080)} | "
+                f"ctx: {preset.get('context_size', 32768)} | "
+                f"temp: {preset.get('temperature', 0.6)} | "
+                f"max: {preset.get('max_tokens', 8192)}"
+                + (f", MTP depth {preset.get('mtp_n_max', 3)}" if mtp_enabled else ", AR only")
+            ),
+        })
+        return base
+
+    extra_args = preset.get("extra_args")
+    if not isinstance(extra_args, list):
+        extra_args = []
+    base.update({
+        "llama_server_path": preset.get("llama_server_path", ""),
+        "mmproj_path": mmproj_path,
+        "mtp_path": mtp_path,
+        "mtp_enabled": mtp_enabled,
+        "chat_template_file": preset.get("chat_template_file", ""),
+        "context_size": int(preset.get("context_size", 18432)),
+        "ngl": int(preset.get("ngl", 99)),
+        "supports_images": bool(mmproj_path),
+        "extra_args": extra_args,
         "description": (
             f"Контекст: {preset.get('context_size', 18432)}, "
             f"GPU слои: {preset.get('ngl', 99)}"
             + (f", Vision" if mmproj_path else ", Текстовая")
-            + (f", MTP" if mtp_path else "")
+            + (f", MTP" if mtp_enabled or mtp_path else "")
+            + (f", +{len(extra_args)} extra" if extra_args else "")
         ),
-    }
+    })
+    return base
 
 
 def get_config_status() -> Dict[str, Any]:
@@ -262,6 +622,7 @@ def get_config_status() -> Dict[str, Any]:
         "config_path": str(CONFIG_FILE),
         "active_preset_index": active_index,
         "active_preset_key": f"preset_{active_index}" if presets else None,
+        "is_macos": bool(_IS_DARWIN and IS_MLX_AVAILABLE),
         "detected_llama_server": find_llama_server(),
         "vosk_small_model_path": config.get("vosk_small_model_path", find_vosk_small_model()),
         "vosk_large_model_path": config.get("vosk_large_model_path", find_vosk_large_model()),
@@ -273,21 +634,19 @@ def get_config_status() -> Dict[str, Any]:
 
 
 def build_preset_record(data: Dict[str, Any]) -> Dict[str, Any]:
+    backend = str(data.get("backend", "llama-server")).strip().lower()
+    if backend not in ("llama-server", "mlx-vlm", "mlx-optiq", "mtplx"):
+        backend = "llama-server"
+
     name = str(data.get("name") or "").strip() or "Default"
-    llama_server_path = resolve_llama_server_executable(data.get("llama_server_path", ""))
     model_path = normalize_path(data.get("model_path", ""))
-    mmproj_path = normalize_path(data.get("mmproj_path", ""), allow_empty=True)
-    mtp_path = normalize_path(data.get("mtp_path", ""), allow_empty=True)
 
     try:
-        context_size = int(data.get("context_size", 18432))
-        ngl = int(data.get("ngl", 99))
         port = int(data.get("port", 8080))
     except (TypeError, ValueError) as error:
-        raise ValueError("Контекст, GPU-слои и порт должны быть целыми числами") from error
-
-    if context_size <= 0 or ngl < 0 or port <= 0:
-        raise ValueError("Некорректные числовые параметры пресета")
+        raise ValueError("Порт должен быть целым числом") from error
+    if port <= 0:
+        raise ValueError("Некорректный порт")
 
     enabled_tools = data.get("enabled_tools")
     if enabled_tools is not None:
@@ -297,17 +656,125 @@ def build_preset_record(data: Dict[str, Any]) -> Dict[str, Any]:
             if str(tool_name).strip()
         ]
 
-    return {
+    record: Dict[str, Any] = {
         "name": name,
-        "llama_server_path": llama_server_path,
+        "backend": backend,
         "model_path": model_path,
-        "mmproj_path": mmproj_path,
-        "mtp_path": mtp_path,
-        "context_size": context_size,
-        "ngl": ngl,
         "port": port,
         "enabled_tools": enabled_tools,
     }
+
+    if backend == "mlx-vlm":
+        try:
+            temperature = float(data.get("temperature", 0.7))
+            max_tokens = int(data.get("max_tokens", 512))
+        except (TypeError, ValueError) as error:
+            raise ValueError("Temperature и max_tokens должны быть числами") from error
+        if temperature < 0 or max_tokens <= 0:
+            raise ValueError("Некорректные параметры MLX")
+        record["temperature"] = temperature
+        record["max_tokens"] = max_tokens
+        return record
+
+    if backend == "mlx-optiq":
+        try:
+            temperature = float(data.get("temperature", 0.6))
+            max_tokens = int(data.get("max_tokens", 8192))
+            context_size = int(data.get("context_size", 32768))
+            max_concurrent = int(data.get("max_concurrent", 4))
+            kv_bits = data.get("kv_bits")
+            if kv_bits is not None:
+                kv_bits = int(kv_bits)
+                if kv_bits not in (4, 8):
+                    raise ValueError("kv_bits должен быть 4 или 8")
+            kv_group_size = int(data.get("kv_group_size", 64))
+            quantized_kv_start = int(data.get("quantized_kv_start", 0))
+            prefill_step_size = int(data.get("prefill_step_size", 2048))
+            prompt_cache_size = data.get("prompt_cache_size")
+            if prompt_cache_size is not None:
+                prompt_cache_size = int(prompt_cache_size)
+            prompt_cache_bytes = data.get("prompt_cache_bytes")
+            if prompt_cache_bytes is not None:
+                prompt_cache_bytes = int(prompt_cache_bytes)
+            mtp_depth = int(data.get("mtp_depth", 2))
+        except (TypeError, ValueError) as error:
+            raise ValueError("Параметры MLX-OptiQ имеют некорректный тип") from error
+        if temperature < 0 or max_tokens <= 0 or context_size <= 0 or max_concurrent <= 0 or kv_group_size <= 0 or quantized_kv_start < 0 or prefill_step_size <= 0 or mtp_depth < 0:
+            raise ValueError("Некорректные параметры MLX-OptiQ")
+        record["temperature"] = temperature
+        record["max_tokens"] = max_tokens
+        record["context_size"] = context_size
+        record["max_concurrent"] = max_concurrent
+        if kv_bits is not None:
+            record["kv_bits"] = kv_bits
+        record["kv_group_size"] = kv_group_size
+        record["quantized_kv_start"] = quantized_kv_start
+        record["prefill_step_size"] = prefill_step_size
+        if prompt_cache_size is not None:
+            record["prompt_cache_size"] = prompt_cache_size
+        if prompt_cache_bytes is not None:
+            record["prompt_cache_bytes"] = prompt_cache_bytes
+        record["pipeline"] = bool(data.get("pipeline", False))
+        record["mtp_enabled"] = bool(data.get("mtp_enabled", False))
+        record["mtp_depth"] = mtp_depth
+        kv_config = str(data.get("kv_config", "")).strip()
+        if kv_config:
+            record["kv_config"] = kv_config
+        return record
+
+    if backend == "mtplx":
+        try:
+            temperature = float(data.get("temperature", 0.6))
+            max_tokens = int(data.get("max_tokens", 12288))
+            context_size = int(data.get("context_size", 65536))
+            mtp_n_max = int(data.get("mtp_n_max", 3))
+        except (TypeError, ValueError) as error:
+            raise ValueError("Temperature, max_tokens, context_size и mtp_n_max должны быть числами") from error
+        if temperature < 0 or max_tokens <= 0 or context_size <= 0 or mtp_n_max < 0:
+            raise ValueError("Некорректные параметры MTPLX")
+        record["temperature"] = temperature
+        record["max_tokens"] = max_tokens
+        record["context_size"] = context_size
+        record["mtp_enabled"] = bool(data.get("mtp_enabled", True))
+        record["mtp_n_max"] = mtp_n_max
+        return record
+
+    llama_server_path = resolve_llama_server_executable(data.get("llama_server_path", ""))
+    mmproj_path = normalize_path(data.get("mmproj_path", ""), allow_empty=True)
+    mtp_path = normalize_path(data.get("mtp_path", ""), allow_empty=True)
+    mtp_enabled = bool(data.get("mtp_enabled"))
+    chat_template_file = normalize_path(data.get("chat_template_file", ""), allow_empty=True)
+
+    try:
+        context_size = int(data.get("context_size", 18432))
+        ngl = int(data.get("ngl", 99))
+    except (TypeError, ValueError) as error:
+        raise ValueError("Контекст, GPU-слои и порт должны быть целыми числами") from error
+
+    if context_size <= 0 or ngl < 0:
+        raise ValueError("Некорректные числовые параметры пресета")
+
+    extra_args = data.get("extra_args")
+    if isinstance(extra_args, list):
+        extra_args = [str(arg) for arg in extra_args if arg is not None]
+        if extra_args:
+            record["extra_args"] = extra_args
+
+    system_prompt_mode = str(data.get("system_prompt_mode", "full")).strip().lower()
+    if system_prompt_mode not in {"full", "minimal", "none"}:
+        system_prompt_mode = "full"
+    record["system_prompt_mode"] = system_prompt_mode
+
+    record.update({
+        "llama_server_path": llama_server_path,
+        "mmproj_path": mmproj_path,
+        "mtp_path": mtp_path,
+        "mtp_enabled": mtp_enabled,
+        "chat_template_file": chat_template_file,
+        "context_size": context_size,
+        "ngl": ngl,
+    })
+    return record
 
 
 def add_preset(data: Dict[str, Any], make_active: bool = True) -> Dict[str, Any]:
@@ -374,6 +841,14 @@ def update_preset_tools(index: int, enabled_tools: List[str]) -> Dict[str, Any]:
 
 
 def setup_wizard():
+    if _IS_DARWIN and IS_MLX_AVAILABLE:
+        print("\n🍎 Обнаружена macOS. Доступны два типа пресетов:")
+        print("  1. MLX (рекомендуется для Apple Silicon)")
+        print("  2. llama-server (GGUF модели)")
+        choice = get_valid_int("Выберите тип пресета", 1)
+        if choice == 1:
+            return setup_mlx_wizard()
+
     print_setup_instructions()
     
     # 1. Llama Server Path
@@ -513,8 +988,15 @@ def select_preset(config):
         print(f"      Сервер: {p['llama_server_path']} (Порт: {p['port']})")
         print("-" * 70)
         
-    print(f"[{len(presets)+1}] Создать новый пресет")
-    print("[0] Выйти")
+    if _IS_DARWIN and IS_MLX_AVAILABLE:
+        print(f"[{len(presets)+1}] Создать новый llama-server пресет")
+        print(f"[{len(presets)+2}] Создать новый MLX пресет")
+        print("[0] Выйти")
+        mlx_option = True
+    else:
+        print(f"[{len(presets)+1}] Создать новый пресет")
+        print("[0] Выйти")
+        mlx_option = False
     
     while True:
         choice = input("\nВыберите действие (введите номер): ").strip()
@@ -523,6 +1005,8 @@ def select_preset(config):
             sys.exit(0)
         elif choice == str(len(presets) + 1):
             return setup_wizard()
+        elif mlx_option and choice == str(len(presets) + 2):
+            return setup_mlx_wizard()
         
         try:
             idx = int(choice) - 1
@@ -540,9 +1024,94 @@ def get_active_preset_command(config):
     presets = config.get("presets", [])
     idx = config.get("active_preset_index", 0)
     if not presets or idx >= len(presets):
-        return None, None
+        return None, None, None
 
     p = presets[idx]
+    backend = p.get("backend", "llama-server")
+
+    if backend == "mlx-vlm":
+        port = int(p.get("port", 8080))
+        args = [
+            sys.executable,
+            "-m",
+            "jarvis_mlx.server",
+            "--model", p["model_path"],
+            "--port", str(port),
+            "--host", "127.0.0.1",
+        ]
+        if p.get("temperature") is not None:
+            args.extend(["--temp", str(p["temperature"])])
+        if p.get("max_tokens") is not None:
+            args.extend(["--max-tokens", str(p["max_tokens"])])
+        command = " ".join(f'"{arg}"' if " " in arg else arg for arg in args)
+        return str(BASE_DIR), args, command
+
+    if backend == "mlx-optiq":
+        port = int(p.get("port", 8080))
+        args = [
+            find_optiq_executable(),
+            "serve",
+            "--model", p["model_path"],
+            "--port", str(port),
+            "--host", "127.0.0.1",
+            "--max-concurrent", str(int(p.get("max_concurrent", 4))),
+            "--no-auth",
+        ]
+        if p.get("temperature") is not None:
+            args.extend(["--temp", str(float(p["temperature"]))])
+        if p.get("max_tokens") is not None:
+            args.extend(["--max-tokens", str(int(p["max_tokens"]))])
+        if p.get("context_size"):
+            args.extend(["--max-context", str(int(p["context_size"]))])
+        if p.get("kv_bits") in (4, 8):
+            args.extend(["--kv-bits", str(int(p["kv_bits"]))])
+            if p.get("kv_group_size") is not None:
+                args.extend(["--kv-group-size", str(int(p["kv_group_size"]))])
+            if p.get("quantized_kv_start") is not None:
+                args.extend(["--quantized-kv-start", str(int(p["quantized_kv_start"]))])
+        elif p.get("kv_config"):
+            args.extend(["--kv-config", str(p["kv_config"])])
+        if p.get("prefill_step_size") is not None:
+            args.extend(["--prefill-step-size", str(int(p["prefill_step_size"]))])
+        if p.get("prompt_cache_size") is not None:
+            args.extend(["--prompt-cache-size", str(int(p["prompt_cache_size"]))])
+        if p.get("prompt_cache_bytes") is not None:
+            args.extend(["--prompt-cache-bytes", str(int(p["prompt_cache_bytes"]))])
+        if p.get("pipeline"):
+            args.append("--pipeline")
+        if p.get("mtp_enabled"):
+            args.append("--mtp")
+            if p.get("mtp_depth") is not None:
+                args.extend(["--mtp-depth", str(int(p["mtp_depth"]))])
+        command = " ".join(f'"{arg}"' if " " in arg else arg for arg in args)
+        return str(BASE_DIR), args, command
+
+    if backend == "mtplx":
+        port = int(p.get("port", 8080))
+        args = [
+            find_mtplx_executable(),
+            "serve",
+            "--model", p["model_path"],
+            "--port", str(port),
+            "--host", "127.0.0.1",
+            "--profile", "sustained",
+            "--unsafe-force-unverified",
+            "--yes",
+            "--no-stats-footer",
+        ]
+        # MTPLX v0.1.x управляет размером контекста через профиль (sustained
+        # для длинного контекста); отдельного флага --context-window нет.
+        if p.get("max_tokens"):
+            args.extend(["--max-tokens", str(int(p["max_tokens"]))])
+        if p.get("temperature") is not None:
+            args.extend(["--default-temperature", str(float(p["temperature"]))])
+        if p.get("mtp_enabled") and p.get("mtp_n_max"):
+            args.extend(["--depth", str(int(p["mtp_n_max"]))])
+        else:
+            args.append("--no-mtp")
+        command = " ".join(f'"{arg}"' if " " in arg else arg for arg in args)
+        return str(BASE_DIR), args, command
+
     cwd = os.path.dirname(p["llama_server_path"])
 
     args = [
@@ -555,6 +1124,19 @@ def get_active_preset_command(config):
     ]
     if p.get("mmproj_path"):
         args.extend(["--mmproj", p["mmproj_path"]])
+    if p.get("mtp_enabled") and not p.get("mtp_path"):
+        args.extend([
+            "--spec-type", "draft-mtp",
+            "--spec-draft-n-max", str(int(p.get("mtp_n_max", 2))),
+        ])
+    elif p.get("mtp_path"):
+        args.extend([
+            "--model-draft", p["mtp_path"],
+            "--spec-type", "draft-mtp",
+            "--spec-draft-n-max", str(int(p.get("mtp_n_max", 2))),
+        ])
+    if p.get("chat_template_file"):
+        args.extend(["--chat-template-file", p["chat_template_file"]])
 
     command = " ".join(f'"{arg}"' if " " in arg else arg for arg in args)
     return cwd, args, command

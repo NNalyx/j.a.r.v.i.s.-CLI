@@ -3,6 +3,7 @@ import jarvis_core.state as _state
 import gc
 import json
 import os
+import sys
 from pathlib import Path
 
 from jarvis_core.colors import Colors
@@ -40,6 +41,25 @@ def _play_wav_windows(output_path: Path) -> bool:
         return True
     except Exception:
         return False
+
+
+def _play_wav_system(output_path: Path) -> bool:
+    """Воспроизвести WAV системным проигрывателем текущей ОС."""
+    if os.name == "nt":
+        return _play_wav_windows(output_path)
+    if sys.platform == "darwin":
+        try:
+            import subprocess
+            subprocess.run(
+                ["afplay", str(output_path)],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return True
+        except Exception:
+            return False
+    return False
 
 def _load_voice_style_from_json(style_path: Path):
     """Загрузить кастомный voice-style JSON для Supertonic."""
@@ -176,8 +196,8 @@ def speak_now(text, ref_audio_path=None, ref_text=None, speed=1.0, volume=1.0,
             except Exception:
                 try:
                     _save_wav_pcm16(output_path, wav, sr)
-                    if not _play_wav_windows(output_path):
-                        raise RuntimeError("winsound playback failed")
+                    if not _play_wav_system(output_path):
+                        raise RuntimeError("system WAV playback failed")
                 except Exception as playback_error:
                     try:
                         _save_wav_pcm16(output_path, wav, sr)
@@ -188,4 +208,3 @@ def speak_now(text, ref_audio_path=None, ref_text=None, speed=1.0, volume=1.0,
 
     except Exception as e:
         print(f"{Colors.YELLOW}[Supertonic] Ошибка: {e}{Colors.RESET}")
-

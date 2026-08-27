@@ -5,8 +5,162 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Jarvis CLI</title>
   <script>window.API_TOKEN = "{{API_TOKEN}}";</script>
-  <link rel="stylesheet" href="/static/app.css?v=6">
+  <link rel="stylesheet" href="/static/app.css?v=30">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+  <style>
+    .system-check-banner {
+      position: relative;
+      margin: -30px -34px 22px -34px;
+      padding: 0;
+      background: rgba(0, 0, 0, 0.72);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+      backdrop-filter: blur(20px);
+      transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1), transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .system-check-banner.hidden { display: none; }
+    .system-check-banner.error { border-bottom-color: rgba(255, 127, 127, 0.45); }
+    .system-check-banner.warning { border-bottom-color: rgba(250, 204, 21, 0.35); }
+    .system-check-banner::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(circle at 24px 24px, rgba(255, 255, 255, 0.06), transparent 24%);
+    }
+    .system-check-content {
+      position: relative;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 16px 34px;
+    }
+    .system-check-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+    }
+    .system-check-icon {
+      flex: 0 0 auto;
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 1.15rem;
+      transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s ease;
+    }
+    .system-check-banner:hover .system-check-icon { transform: scale(1.08); background: rgba(255, 255, 255, 0.07); }
+    .system-check-text { flex: 1; min-width: 0; }
+    .system-check-title {
+      font-family: "Segoe UI Variable Display", "Bahnschrift SemiBold", "Trebuchet MS", sans-serif;
+      font-weight: 700;
+      color: var(--text);
+      font-size: 1rem;
+      letter-spacing: -0.01em;
+    }
+    .system-check-message { color: var(--muted); font-size: 0.88rem; margin-top: 3px; line-height: 1.45; }
+    .system-check-close {
+      flex: 0 0 auto;
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      font-size: 1.4rem;
+      line-height: 1;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 8px;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .system-check-close:hover { color: var(--text); background: rgba(255, 255, 255, 0.08); }
+    .system-check-list {
+      margin: 14px 0 0 50px;
+      display: grid;
+      gap: 10px;
+    }
+    .system-check-issue {
+      background: rgba(255, 255, 255, 0.025);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 18px;
+      padding: 14px 16px;
+      transition: background 0.25s ease, border-color 0.25s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .system-check-issue:hover { background: rgba(255, 255, 255, 0.045); border-color: rgba(255, 255, 255, 0.12); transform: translateX(4px); }
+    .system-check-issue.error { border-left: 3px solid rgba(255, 127, 127, 0.6); }
+    .system-check-issue.warning { border-left: 3px solid rgba(250, 204, 21, 0.55); }
+    .system-check-issue-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      justify-content: space-between;
+    }
+    .system-check-issue-title {
+      font-weight: 600;
+      color: var(--text);
+      font-size: 0.9rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .system-check-issue-badge {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-weight: 700;
+    }
+    .system-check-issue-badge.error { background: rgba(255, 127, 127, 0.15); color: #ffb3b3; }
+    .system-check-issue-badge.warning { background: rgba(250, 204, 21, 0.12); color: #fde68a; }
+    .system-check-issue-message { color: var(--muted); font-size: 0.82rem; margin-top: 5px; line-height: 1.45; }
+    .system-check-issue-actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .system-check-issue-actions button {
+      font-size: 0.78rem;
+      padding: 7px 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.05);
+      color: var(--text);
+      cursor: pointer;
+      transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .system-check-issue-actions button:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.18); transform: translateY(-1px); }
+    .system-check-issue-actions button.primary { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.22); }
+    .system-check-issue-actions button.primary:hover { background: rgba(255, 255, 255, 0.2); border-color: rgba(255, 255, 255, 0.3); }
+    .system-check-solution {
+      margin-top: 10px;
+      padding: 12px 14px;
+      background: rgba(255, 255, 255, 0.02);
+      border-radius: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .system-check-solution.hidden { display: none; }
+    .system-check-solution-title {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 6px;
+      font-weight: 700;
+    }
+    .system-check-solution ol {
+      margin: 0;
+      padding-left: 18px;
+      color: #d7e3ec;
+      font-size: 0.82rem;
+      line-height: 1.55;
+    }
+    .system-check-solution li { margin: 3px 0; }
+    .system-check-solution code {
+      background: rgba(255, 255, 255, 0.08);
+      padding: 1px 5px;
+      border-radius: 5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.78rem;
+      color: #a5f3fc;
+    }
+  </style>
 </head>
 <body>
   <!-- Загрузочный экран -->
@@ -30,38 +184,132 @@
           <div class="panel-title">Первая настройка</div>
           <button id="preset-setup-back-btn" type="button" class="text-action hidden">← Назад</button>
         </div>
-        <p class="hint setup-lead">
-          Укажите пути к <strong>llama-server</strong> и модели. Пресет сохранится в
+        <p class="hint setup-lead" id="preset-setup-lead">
+          Укажите параметры пресета. Пресет сохранится в
           <code>jarvis_config.json</code> на этом компьютере.
         </p>
         <form id="preset-setup-form" class="preset-form">
           <label class="label" for="preset-name-input">Название пресета</label>
           <input id="preset-name-input" class="text-input" type="text" placeholder="Например, Qwen Fast">
 
-          <label class="label" for="preset-llama-input">Путь к llama-server.exe</label>
-          <input id="preset-llama-input" class="text-input" type="text" placeholder="C:\llama_server\llama-server.exe" required>
-          <p class="hint">Нужен именно <strong>llama-server.exe</strong>, не llama.exe (это другая программа).</p>
+          <div id="preset-backend-wrap" class="hidden">
+            <label class="label" for="preset-backend-select">Бэкенд сервера</label>
+            <select id="preset-backend-select" class="text-input">
+              <option value="llama-server">llama-server (gguf)</option>
+              <option value="mlx-vlm">MLX (Apple Silicon, mlx-vlm)</option>
+              <option value="mtplx">MTPLX (Apple Silicon, native MTP)</option>
+            </select>
+          </div>
 
-          <label class="label" for="preset-model-input">Путь к модели (.gguf)</label>
-          <input id="preset-model-input" class="text-input" type="text" placeholder="C:\models\qwen.gguf" required>
+          <div id="preset-llama-fields">
+            <label class="label" for="preset-llama-input">Путь к llama-server.exe</label>
+            <input id="preset-llama-input" class="text-input" type="text" placeholder="C:\llama_server\llama-server.exe" required>
+            <p class="hint" id="preset-llama-hint">Нужен именно <strong>llama-server.exe</strong>, не llama.exe (это другая программа).</p>
+          </div>
 
-          <label class="label" for="preset-mmproj-input">Путь к mmproj (.gguf), опционально</label>
-          <input id="preset-mmproj-input" class="text-input" type="text" placeholder="Оставьте пустым для текстовой модели">
+          <label class="label" for="preset-model-input">Путь к модели</label>
+          <div class="model-path-row">
+            <input id="preset-model-input" class="text-input" type="text" placeholder="C:\models\qwen.gguf" required>
+            <button id="preset-scan-models-btn" type="button" class="ghost">Найти локально</button>
+          </div>
+          <select id="preset-local-models-select" class="text-input hidden" size="1">
+            <option value="">— выберите найденную модель —</option>
+          </select>
 
-          <label class="label" for="preset-mtp-input">Путь к MTP (.gguf), опционально</label>
-          <input id="preset-mtp-input" class="text-input" type="text" placeholder="Оставьте пустым, если не используется">
-          <div class="preset-form-grid">
-            <div>
-              <label class="label" for="preset-context-input">Контекст</label>
-              <input id="preset-context-input" class="text-input" type="number" min="1024" step="1024" value="18432">
+          <div id="preset-download-section" class="download-section">
+            <label class="label" for="preset-hf-repo-input">Или скачать с HuggingFace</label>
+            <div class="download-row">
+              <input id="preset-hf-repo-input" class="text-input" type="text" placeholder="mlx-community/Qwen2.5-0.5B-Instruct-MLX-8bit">
+              <button id="preset-download-btn" type="button" class="ghost">Скачать</button>
             </div>
-            <div>
-              <label class="label" for="preset-ngl-input">GPU слои (-ngl)</label>
-              <input id="preset-ngl-input" class="text-input" type="number" min="0" step="1" value="99">
+            <label class="label" for="preset-hf-token-input">HF Token (опционально, для скорости)</label>
+            <input id="preset-hf-token-input" class="text-input" type="password" placeholder="hf_..." autocomplete="off">
+            <p class="hint">Введите repo_id модели в формате <code>автор/название</code> и нажмите «Скачать». Поддерживаются MLX-модели. Токен убирает ограничения скорости HuggingFace.</p>
+            <div id="download-progress-wrap" class="download-progress-wrap hidden">
+              <div class="download-progress-info">
+                <span id="download-progress-text">0%</span>
+                <span id="download-progress-meta">—</span>
+              </div>
+              <div class="download-progress-track">
+                <div id="download-progress-bar" class="download-progress-bar" style="width: 0%"></div>
+              </div>
+              <p class="hint" id="download-progress-hint">Подготовка...</p>
             </div>
-            <div>
-              <label class="label" for="preset-port-input">Порт</label>
-              <input id="preset-port-input" class="text-input" type="number" min="1" step="1" value="8080">
+          </div>
+
+          <div id="preset-mlx-fields" class="hidden">
+            <div class="preset-form-grid">
+              <div>
+                <label class="label" for="preset-temperature-input">Temperature</label>
+                <input id="preset-temperature-input" class="text-input" type="number" min="0" max="2" step="0.1" value="0.7">
+              </div>
+              <div>
+                <label class="label" for="preset-max-tokens-input">Max tokens</label>
+                <input id="preset-max-tokens-input" class="text-input" type="number" min="1" step="1" value="512">
+              </div>
+              <div>
+                <label class="label" for="preset-port-input">Порт</label>
+                <input id="preset-port-input" class="text-input" type="number" min="1" step="1" value="8080">
+              </div>
+            </div>
+          </div>
+
+          <div id="preset-mtplx-fields" class="hidden">
+            <div class="preset-form-grid">
+              <div>
+                <label class="label" for="preset-mtplx-temperature-input">Temperature</label>
+                <input id="preset-mtplx-temperature-input" class="text-input" type="number" min="0" max="2" step="0.1" value="0.6">
+              </div>
+              <div>
+                <label class="label" for="preset-mtplx-max-tokens-input">Max tokens</label>
+                <input id="preset-mtplx-max-tokens-input" class="text-input" type="number" min="1" step="1" value="12288">
+              </div>
+              <div>
+                <label class="label" for="preset-mtplx-port-input">Порт</label>
+                <input id="preset-mtplx-port-input" class="text-input" type="number" min="1" step="1" value="8080">
+              </div>
+            </div>
+            <div class="preset-form-grid">
+              <div>
+                <label class="label" for="preset-mtplx-context-input">Контекст</label>
+                <input id="preset-mtplx-context-input" class="text-input" type="number" min="1024" step="1024" value="65536">
+              </div>
+              <div>
+                <label class="label" for="preset-mtplx-depth-input">MTP depth</label>
+                <input id="preset-mtplx-depth-input" class="text-input" type="number" min="0" max="8" step="1" value="3">
+              </div>
+            </div>
+            <label class="checkbox-label" style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+              <input id="preset-mtplx-mtp-enabled-input" type="checkbox" checked>
+              <span>Активировать native MTP</span>
+            </label>
+          </div>
+
+          <div id="preset-llama-extra-fields">
+            <label class="label" for="preset-mmproj-input">Путь к mmproj (.gguf), опционально</label>
+            <input id="preset-mmproj-input" class="text-input" type="text" placeholder="Оставьте пустым для текстовой модели">
+
+            <label class="label" for="preset-mtp-input">Путь к MTP (.gguf), опционально</label>
+            <input id="preset-mtp-input" class="text-input" type="text" placeholder="Оставьте пустым, если не используется">
+
+            <label class="checkbox-label" style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+              <input id="preset-mtp-enabled-input" type="checkbox">
+              <span>Активировать встроенный MTP (Qwen3.6 и др.)</span>
+            </label>
+
+            <div class="preset-form-grid">
+              <div>
+                <label class="label" for="preset-context-input">Контекст</label>
+                <input id="preset-context-input" class="text-input" type="number" min="1024" step="1024" value="18432">
+              </div>
+              <div>
+                <label class="label" for="preset-ngl-input">GPU слои (-ngl)</label>
+                <input id="preset-ngl-input" class="text-input" type="number" min="0" step="1" value="99">
+              </div>
+              <div>
+                <label class="label" for="preset-port-input-llama">Порт</label>
+                <input id="preset-port-input-llama" class="text-input" type="number" min="1" step="1" value="8080">
+              </div>
             </div>
           </div>
 
@@ -83,7 +331,7 @@
         <select id="loading-asr-select"></select>
         <p class="hint" id="loading-asr-description"></p>
         <div class="loading-actions">
-          <button id="loading-start-btn" class="primary">Запустить llama-server</button>
+          <button id="loading-start-btn" class="primary">Запустить сервер модели</button>
           <button id="preset-add-btn" type="button" class="ghost">+ Новый пресет</button>
         </div>
       </section>
@@ -113,9 +361,33 @@
         <div id="chat-list-empty" class="chats-empty hidden">Чатов пока нет</div>
         <div id="chat-list" class="chat-list"></div>
       </section>
+
+      <section class="panel background-tasks-panel" aria-label="Фоновые задачи">
+        <div class="panel-title-row">
+          <div class="panel-title">Фоновые задачи</div>
+          <span id="background-task-count" class="background-task-count">0</span>
+        </div>
+        <div id="background-task-list" class="background-task-list">
+          <div class="background-task-empty">Нет запущенных задач</div>
+        </div>
+      </section>
     </aside>
 
     <main class="workspace">
+      <div id="system-check-banner" class="system-check-banner hidden" aria-live="polite">
+        <div class="system-check-content">
+          <div class="system-check-header">
+            <div class="system-check-icon" id="system-check-icon">⚠️</div>
+            <div class="system-check-text">
+              <div class="system-check-title" id="system-check-title">Проверка системы</div>
+              <div class="system-check-message" id="system-check-message">Обнаружены проблемы, которые могут мешать работе Jarvis.</div>
+            </div>
+            <button id="system-check-close" class="system-check-close" type="button" aria-label="Закрыть">×</button>
+          </div>
+          <div id="system-check-list" class="system-check-list"></div>
+        </div>
+      </div>
+
       <header class="hero">
         <div class="hero-copy">
           <div class="hero-kicker">Local Agent</div>
@@ -130,14 +402,53 @@
       <section class="chat-frame">
         <div id="chat-log" class="chat-log"></div>
         <form id="chat-form" class="composer">
+          <section id="active-plan-panel" class="active-plan-panel hidden is-collapsed" aria-label="Активный план">
+            <div class="active-plan-glow" aria-hidden="true"></div>
+            <button id="active-plan-toggle" class="active-plan-toggle" type="button" aria-expanded="false">
+              <span class="active-plan-toggle-copy">
+                <span class="active-plan-toggle-kicker">
+                  <svg class="active-plan-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M12 20h9"/>
+                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+                  </svg>
+                  План
+                </span>
+                <span id="active-plan-title" class="active-plan-title"></span>
+              </span>
+              <span class="active-plan-toggle-meta">
+                <span class="active-plan-progress-wrap">
+                  <span id="active-plan-step-count" class="active-plan-step-count">0</span>
+                  <span class="active-plan-progress-bar">
+                    <span id="active-plan-progress-fill" class="active-plan-progress-fill"></span>
+                  </span>
+                </span>
+                <span class="active-plan-toggle-chevron" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="m6 9 6 6 6-6"/>
+                  </svg>
+                </span>
+              </span>
+            </button>
+            <div id="active-plan-list" class="active-plan-list">
+              <div class="active-plan-empty">Нет активного плана</div>
+            </div>
+          </section>
           <textarea id="message-input" placeholder="Напиши задачу для Jarvis..." rows="3"></textarea>
           <div id="paste-preview" class="paste-preview is-empty"></div>
           <div class="composer-bar">
             <div class="composer-left">
               <div id="live-status" class="live-status is-idle">
+                <span class="live-status-orb" aria-hidden="true"></span>
                 <span class="spinner" aria-hidden="true"></span>
                 <span id="live-status-text">Готов к работе</span>
+                <span class="live-status-dots" aria-hidden="true"><span></span><span></span><span></span></span>
                 <span id="live-status-timer" class="live-status-timer hidden">0.0s</span>
+              </div>
+              <div id="live-status-progress" class="live-status-progress hidden">
+                <div class="live-status-progress-track">
+                  <div id="live-status-progress-bar" class="live-status-progress-bar" style="width: 0%"></div>
+                </div>
+                <span id="live-status-progress-text" class="live-status-progress-text">0%</span>
               </div>
             </div>
             <div class="composer-actions">
@@ -149,6 +460,14 @@
               >
                 <span id="context-indicator-text" class="context-indicator-text">ctx</span>
               </div>
+              <button id="voice-message-btn" type="button" class="icon-action voice-message-btn" aria-label="Записать голосовое сообщение">
+                <svg class="mic-icon" viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="9" y="3" width="6" height="11" rx="3"/>
+                  <path d="M19 10v1a7 7 0 0 1-14 0v-1"/>
+                  <path d="M12 19v3"/>
+                  <path d="M8 22h8"/>
+                </svg>
+              </button>
               <button id="send-btn" type="submit" class="primary send-btn-icon" aria-label="Отправить">
                 <span class="send-btn-arrow" aria-hidden="true">➜</span>
               </button>
@@ -194,6 +513,11 @@
       <label class="label" for="voice-asr-select">Backend расшифровки</label>
       <select id="voice-asr-select"></select>
       <p class="hint" id="voice-asr-description">Выберите движок потоковой расшифровки после wake word.</p>
+      <div id="vosk-download-banner" class="vosk-download-banner hidden">
+        <p class="hint">Модель Vosk не найдена. Голосовой ввод недоступен.</p>
+        <button id="vosk-download-btn" type="button" class="primary">Скачать Vosk (~35 MB)</button>
+        <span id="vosk-download-status" class="vosk-download-status"></span>
+      </div>
     </section>
 
     <section class="panel accent settings-panel">
@@ -291,14 +615,52 @@
     </div>
   </div>
 
+  <!-- Модальное окно обновления приложения -->
+  <div id="update-modal" class="update-modal hidden" aria-hidden="true">
+    <div class="update-modal-backdrop"></div>
+    <div class="update-modal-card glow">
+      <div class="update-modal-kicker">Доступно обновление</div>
+      <div class="update-modal-title">Новая версия Jarvis CLI</div>
+      <p class="hint update-modal-hint">
+        На GitHub опубликована обновлённая версия приложения.
+        Хотите установить её сейчас? Приложение перезапустится автоматически.
+      </p>
+      <div class="update-modal-meta">
+        <span>Текущая: <code id="update-current-version">—</code></span>
+        <span>Новая: <code id="update-latest-version">—</code></span>
+      </div>
+      <p id="update-error" class="form-error hidden"></p>
+      <div class="update-modal-actions">
+        <button id="update-later-btn" type="button" class="ghost">Позже</button>
+        <button id="update-now-btn" type="button" class="primary">Обновить</button>
+      </div>
+    </div>
+  </div>
+
   <template id="message-template">
     <article class="message">
       <div class="message-role"></div>
       <div class="message-body"></div>
+      <div class="message-actions">
+        <button type="button" class="message-action copy-action" aria-label="Скопировать">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+          <span>Скопировать</span>
+        </button>
+        <button type="button" class="message-action edit-action" aria-label="Изменить">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+          </svg>
+          <span>Изменить</span>
+        </button>
+      </div>
     </article>
   </template>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-  <script src="/static/app.js?v=16"></script>
+  <script src="/static/app.js?v=43"></script>
 </body>
 </html>

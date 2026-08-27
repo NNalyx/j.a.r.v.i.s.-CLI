@@ -1,11 +1,13 @@
 import json
 import base64
 import atexit
+import ctypes
 import mimetypes
 import os
 import queue
 import re
 import secrets
+import subprocess
 import sys
 import threading
 import time
@@ -13,6 +15,7 @@ import uuid
 import webbrowser
 from copy import deepcopy
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -35,6 +38,7 @@ except ImportError:
 
 import config_manager
 from jarvis_core import state
+from jarvis_tools.background import list_background_tasks, stop_background_task
 
 from jarvis_cli_gui import (
     AnimationManager,
@@ -49,13 +53,27 @@ from jarvis_cli_gui import (
 )
 
 try:
-    from jarvis_voice import LARGE_VOSK_TRANSCRIPTION_BACKEND_KEY, WAKE_WORD, get_transcription_backend_catalog
+    from jarvis_voice import (
+        LARGE_VOSK_TRANSCRIPTION_BACKEND_KEY,
+        VOSK_MODEL_NAME,
+        WAKE_WORD,
+        download_vosk_model,
+        get_transcription_backend_catalog,
+        record_voice_message,
+    )
 except ImportError:
     LARGE_VOSK_TRANSCRIPTION_BACKEND_KEY = "vosk_large"
     WAKE_WORD = "пятница"
+    VOSK_MODEL_NAME = "vosk-model-small-ru-0.22"
 
     def get_transcription_backend_catalog(selected_key=None):
         return []
+
+    def record_voice_message(*args, **kwargs):
+        return {"ok": False, "error": "Voice module is not available"}
+
+    def download_vosk_model(target_dir=None):
+        return False
 
 try:
     import webview
@@ -145,69 +163,228 @@ desktop_app.tts_disable_locked = False
 chat_lock = threading.RLock()
 tts_lock = threading.Lock()
 voice_lock = threading.Lock()
+voice_message_session_lock = threading.Lock()
+voice_message_session: Optional[Dict[str, Any]] = None
 active_stream_lock = threading.Lock()
 active_stream_bridge = None
 active_chat_id: Optional[str] = None
 
+AUTO_COMPACTION_THRESHOLD = 100_000
+AUTO_COMPACTION_KEEP_MESSAGES = 12
+
 # User-prompt state for synchronous ask_user tool
 pending_user_prompts: Dict[str, threading.Event] = {}
+pending_user_prompt_cancels: Dict[str, threading.Event] = {}
 pending_user_answers: Dict[str, str] = {}
 _user_prompt_lock = threading.Lock()
+
+# Minimum time the user is given to answer an ask_user prompt (seconds).
+# Prevents the model from passing an unreasonably short timeout.
+MIN_ASK_USER_TIMEOUT = 30.0
+
+IS_MACOS = sys.platform == "darwin"
+
+
+def _check_macos_accessibility() -> bool:
+    """Проверить, выдано ли приложению право Accessibility (управление UI)."""
+    try:
+        framework = "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices"
+        ax = ctypes.CDLL(framework)
+        ax.AXIsProcessTrusted.restype = ctypes.c_bool
+        return bool(ax.AXIsProcessTrusted(None))
+    except Exception:
+        return False
+
+
+def _check_macos_screen_recording() -> bool:
+    """Проверить, есть ли право на запись экрана (скриншоты)."""
+    try:
+        framework = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics"
+        cg = ctypes.CDLL(framework)
+        cg.CGPreflightScreenCaptureAccess.restype = ctypes.c_bool
+        return bool(cg.CGPreflightScreenCaptureAccess())
+    except Exception:
+        return False
+
+
+def _check_pyautogui() -> bool:
+    try:
+        import pyautogui  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def _run_system_checks() -> List[Dict[str, Any]]:
+    """Автопроверка системных разрешений и зависимостей."""
+    issues: List[Dict[str, Any]] = []
+
+    # Состояние LLM-сервера проверяется загрузочным экраном пресета.
+    # Не дублируем эту проверку в системном баннере: при старте сервер ещё
+    # может подниматься, и временный offline не является ошибкой настройки.
+
+    # 1. HF-токен (ускоряет скачивание, но не критичен)
+    if not os.environ.get("HF_TOKEN") and not os.environ.get("HUGGINGFACE_TOKEN"):
+        issues.append({
+            "id": "hf_token_missing",
+            "title": "HF Token не задан",
+            "message": "Без токена HuggingFace загрузка моделей идёт медленнее и может прерваться.",
+            "severity": "warning",
+            "fix_action": "env_hint",
+            "solution": [
+                "Получите токен на huggingface.co/settings/tokens (READ достаточно).",
+                "Добавьте его в переменные окружения: export HF_TOKEN=hf_ВАШ_ТОКЕН",
+                "Или вставьте токен в поле HF Token при скачивании модели в настройках пресета.",
+            ],
+        })
+
+    # 3. macOS-специфичные разрешения
+    if IS_MACOS:
+        if not _check_macos_accessibility():
+            issues.append({
+                "id": "macos_accessibility",
+                "title": "Нет доступа Accessibility",
+                "message": "Для управления окнами и UI-автоматизации нужно разрешение Accessibility.",
+                "severity": "warning",
+                "fix_action": "open_url",
+                "fix_url": "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+                "solution": [
+                    "Откройте Системные настройки → Конфиденциальность и безопасность → Универсальный доступ.",
+                    "Нажмите замок внизу и введите пароль администратора.",
+                    "Найдите в списке терминал, Python или приложение Jarvis и включите переключатель.",
+                    "Если приложения нет — добавьте его через кнопку «+» и перезапустите.",
+                ],
+            })
+
+        if not _check_macos_screen_recording():
+            issues.append({
+                "id": "macos_screen_recording",
+                "title": "Нет доступа к записи экрана",
+                "message": "Для скриншотов и анализа интерфейса нужно разрешение Screen Recording.",
+                "severity": "warning",
+                "fix_action": "open_url",
+                "fix_url": "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+                "solution": [
+                    "Откройте Системные настройки → Конфиденциальность и безопасность → Запись экрана.",
+                    "Нажмите замок и введите пароль администратора.",
+                    "Включите переключатель для терминала, Python или приложения Jarvis.",
+                    "Перезапустите приложение — без перезапуска разрешение не применится.",
+                ],
+            })
+
+    # 4. pyautogui (нужен для click_text и некоторых UI-инструментов)
+    if not _check_pyautogui():
+        issues.append({
+            "id": "pyautogui_missing",
+            "title": "pyautogui не установлен",
+            "message": "Некоторые инструменты управления мышью недоступны.",
+            "severity": "warning",
+            "fix_action": "env_hint",
+            "solution": [
+                "Активируйте виртуальное окружение проекта:",
+                "source /Users/roma/PycharmProjects/j.a.r.v.i.s.-CLI/venv/bin/activate",
+                "Установите зависимость: pip install pyautogui",
+                "Перезапустите Jarvis.",
+            ],
+        })
+
+    return issues
 
 
 def register_user_prompt(question: str, timeout: float = 120.0) -> Optional[str]:
     """Show a modal prompt in the UI and block until the user answers.
 
     Must be called from within an active chat stream (when active_stream_bridge
-    is set). If the stream is cancelled, the wait is interrupted.
+    is set). If the stream is cancelled or the user presses Stop, the wait is
+    interrupted and a timeout/cancellation error is returned to the agent.
     """
     prompt_id = str(uuid.uuid4())
     event = threading.Event()
+    cancel_event = threading.Event()
     with _user_prompt_lock:
         pending_user_prompts[prompt_id] = event
+        pending_user_prompt_cancels[prompt_id] = cancel_event
         pending_user_answers.pop(prompt_id, None)
 
     bridge = active_stream_bridge
     if bridge is None:
         with _user_prompt_lock:
             pending_user_prompts.pop(prompt_id, None)
+            pending_user_prompt_cancels.pop(prompt_id, None)
         raise RuntimeError("Нет активного чата для показа вопроса")
 
     bridge.push("user_prompt", prompt_id=prompt_id, question=question)
 
     try:
-        # Wait for the user response or until the stream bridge is cleared.
-        deadline = time.time() + max(1.0, float(timeout))
+        # Enforce a sane minimum timeout so the user actually has time to answer.
+        effective_timeout = max(MIN_ASK_USER_TIMEOUT, float(timeout))
+        deadline = time.time() + effective_timeout
+        last_keepalive = time.time()
         while time.time() < deadline:
-            if event.wait(timeout=0.5):
+            if event.wait(timeout=0.2):
                 break
-            # If the stream bridge was replaced/cleared, the generation was
-            # cancelled — abort the prompt.
-            if active_stream_bridge is not bridge:
-                with _user_prompt_lock:
-                    pending_user_prompts.pop(prompt_id, None)
-                    pending_user_answers.pop(prompt_id, None)
+            # Keep the SSE connection alive while the modal is open, otherwise
+            # browsers/proxies may drop an idle stream before the user answers.
+            if time.time() - last_keepalive >= 15.0:
+                bridge.push(
+                    "user_prompt_keepalive",
+                    prompt_id=prompt_id,
+                    remaining_seconds=int(deadline - time.time()),
+                )
+                last_keepalive = time.time()
+            # Abort if the stream was stopped/cancelled from the UI or if the
+            # active stream ended for any reason.
+            if (
+                cancel_event.is_set()
+                or active_stream_bridge is not bridge
+                or desktop_app.agent.stop_requested()
+            ):
                 raise RuntimeError("Генерация отменена — запрос к пользователю прерван")
         else:
-            # Timeout
-            with _user_prompt_lock:
-                pending_user_prompts.pop(prompt_id, None)
-                pending_user_answers.pop(prompt_id, None)
             raise TimeoutError("Время ожидания ответа пользователя истекло")
+
+        # If cancellation raced with the answer, discard the answer and report
+        # cancellation so the agent doesn't continue with a stale response.
+        if cancel_event.is_set() or desktop_app.agent.stop_requested():
+            raise RuntimeError("Генерация отменена — запрос к пользователю прерван")
 
         with _user_prompt_lock:
             answer = pending_user_answers.pop(prompt_id, None)
-            pending_user_prompts.pop(prompt_id, None)
         return answer
     except Exception:
+        # Tell the UI to close the modal when the prompt expired or was cancelled.
+        try:
+            if bridge is not None:
+                bridge.push("user_prompt_close", prompt_id=prompt_id)
+        except Exception:
+            pass
+        raise
+    finally:
         with _user_prompt_lock:
             pending_user_prompts.pop(prompt_id, None)
+            pending_user_prompt_cancels.pop(prompt_id, None)
             pending_user_answers.pop(prompt_id, None)
-        raise
+
+
+def cancel_all_user_prompts() -> None:
+    """Signal cancellation for every pending ask_user prompt."""
+    with _user_prompt_lock:
+        for cancel_event in list(pending_user_prompt_cancels.values()):
+            cancel_event.set()
 
 
 # Register the handler so ask_user tool can use the web UI.
 state.user_prompt_handler = register_user_prompt
+
+def _get_vosk_small_model_path() -> str:
+    return os.path.join(os.path.expanduser("~"), ".vosk-models", VOSK_MODEL_NAME)
+
+
+def _is_vosk_model_missing() -> bool:
+    if not VOICE_AVAILABLE or not VOSK_MODEL_NAME:
+        return False
+    return not os.path.exists(_get_vosk_small_model_path())
+
 
 voice_state: Dict[str, Any] = {
     "available": bool(VOICE_AVAILABLE),
@@ -222,11 +399,14 @@ voice_state: Dict[str, Any] = {
     "final_command_id": 0,
     "backend_key": DEFAULT_TRANSCRIPTION_BACKEND_KEY,
     "backend_label": "Vosk Small RU",
+    "model_missing": _is_vosk_model_missing(),
+    "model_downloading": False,
 }
 main_window = None
 
 app = FastAPI(title="Jarvis Desktop")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount("/images", StaticFiles(directory=os.path.join(BASE_DIR, "jarvis_agent_images")), name="images")
 
 # Случайный токен для защиты локального API от других процессов/вкладок
 API_TOKEN = secrets.token_urlsafe(32)
@@ -269,6 +449,16 @@ class ChatStateRequest(BaseModel):
     ui_messages: List[Dict[str, Any]] = Field(default_factory=list)
 
 
+class EditMessageRequest(BaseModel):
+    message_index: int = Field(..., ge=0)
+    new_text: str = Field(..., min_length=1)
+
+
+class SummarizeChatRequest(BaseModel):
+    keep_last_n: int = 12
+    max_summary_tokens: int = 2048
+
+
 class RenameChatRequest(BaseModel):
     title: str
 
@@ -277,16 +467,33 @@ class StartModelRequest(BaseModel):
     model_key: str
 
 
+class BackgroundTaskStopRequest(BaseModel):
+    task_id: str = ""
+    pid: Optional[int] = None
+
+
 class PresetCreateRequest(BaseModel):
     name: str = "Default"
-    llama_server_path: str
-    model_path: str
+    backend: str = "llama-server"
+    llama_server_path: str = ""
+    model_path: str = ""
     mmproj_path: str = ""
     mtp_path: str = ""
+    mtp_enabled: bool = False
+    mtp_n_max: int = 2
     context_size: int = 18432
     ngl: int = 99
     port: int = 8080
+    temperature: float = 0.7
+    max_tokens: int = 512
+    extra_args: List[str] = Field(default_factory=list)
     make_active: bool = True
+
+
+class DownloadModelRequest(BaseModel):
+    repo_id: str
+    local_dir: str = ""
+    hf_token: Optional[str] = None
 
 
 class PresetSelectRequest(BaseModel):
@@ -335,6 +542,7 @@ class TelegramAccountConfirm2FARequest(BaseModel):
 
 def _get_voice_state() -> Dict[str, Any]:
     with voice_lock:
+        voice_state["model_missing"] = _is_vosk_model_missing()
         return dict(voice_state)
 
 
@@ -471,7 +679,20 @@ def _chat_file_path(chat_id: str) -> str:
 
 def _default_agent_messages() -> List[Dict[str, Any]]:
     desktop_app.agent.refresh_system_prompt()
-    return [{"role": "system", "content": desktop_app.agent.system_prompt}]
+    return [{"role": "system", "content": desktop_app.agent._build_augmented_system_prompt()}]
+
+
+def _normalize_chat_runtime_state(value: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Normalize per-chat agent state so chats cannot leak runtime context."""
+    value = value if isinstance(value, dict) else {}
+    plan = value.get("active_plan")
+    if not isinstance(plan, dict):
+        plan = None
+    return {
+        "active_plan": deepcopy(plan),
+        "working_directory": str(value.get("working_directory") or "") or None,
+        "last_active_file_path": str(value.get("last_active_file_path") or "") or None,
+    }
 
 
 def _normalize_agent_messages(messages: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
@@ -520,6 +741,151 @@ def _extract_text_from_agent_content(content: Any) -> str:
             parts.append(text)
 
     return "\n".join(parts).strip()
+
+
+def _build_transcript_for_summary(
+    messages: List[Dict[str, Any]], keep_last_n: int = 0
+) -> tuple[str, List[Dict[str, Any]]]:
+    """Build a plain-text transcript for LLM summarization.
+
+    Returns:
+        transcript: string containing the conversation to summarize.
+        kept_messages: recent messages that should be preserved verbatim.
+    """
+    if not isinstance(messages, list) or not messages:
+        return "", []
+
+    # Skip the system message and preserve a complete recent conversation
+    # boundary. Never leave a tool result without its assistant tool call.
+    body = messages[1:] if messages[0].get("role") == "system" else list(messages)
+    keep_last_n = max(0, int(keep_last_n or 0))
+    if keep_last_n > 0 and len(body) > keep_last_n:
+        keep_start = len(body) - keep_last_n
+        while keep_start > 0 and body[keep_start].get("role") != "user":
+            keep_start -= 1
+        kept_messages = body[keep_start:]
+        to_summarize = body[:keep_start]
+    else:
+        kept_messages = []
+        to_summarize = body
+
+    lines: List[str] = []
+    for msg in to_summarize:
+        role = str(msg.get("role") or "").lower()
+        if role == "system":
+            continue
+        content = msg.get("content")
+        text = _extract_text_from_agent_content(content)
+        if role == "tool":
+            tool_name = str(msg.get("name") or "tool")
+            text = text[:6000]
+            lines.append(f"Tool result ({tool_name}): {text or '(empty result)'}")
+            continue
+
+        if role == "assistant" and msg.get("tool_calls"):
+            calls = []
+            for call in msg.get("tool_calls") or []:
+                function = call.get("function") if isinstance(call, dict) else {}
+                if not isinstance(function, dict):
+                    continue
+                calls.append(
+                    f"{function.get('name', 'tool')} "
+                    f"{str(function.get('arguments', '{}'))[:2500]}"
+                )
+            lines.append("Assistant tool calls: " + "; ".join(calls))
+
+        if text:
+            label = "User" if role == "user" else "Assistant"
+            lines.append(f"{label}: {text[:6000]}")
+
+    return "\n\n".join(lines), kept_messages
+
+
+def _compact_chat_context(
+    chat_id: str,
+    keep_last_n: int = AUTO_COMPACTION_KEEP_MESSAGES,
+    max_summary_tokens: int = 2048,
+) -> Dict[str, Any]:
+    """Summarize old agent history and retain a complete recent tool chain."""
+    record = _load_chat_record(chat_id)
+    with chat_lock:
+        transcript, kept_messages = _build_transcript_for_summary(
+            desktop_app.agent.messages, keep_last_n=keep_last_n
+        )
+        runtime = _normalize_chat_runtime_state({
+            "active_plan": desktop_app.agent.active_plan,
+            "working_directory": desktop_app.agent.working_directory,
+            "last_active_file_path": desktop_app.agent.last_active_file_path,
+        })
+
+    if not transcript.strip():
+        return {"ok": False, "reason": "Nothing to summarize", "record": record}
+
+    runtime_text = [
+        f"Current working directory: {runtime['working_directory'] or 'not set'}",
+        f"Active plan: {json.dumps(runtime['active_plan'], ensure_ascii=False) if runtime['active_plan'] else 'none'}",
+    ]
+    summary_prompt = (
+        "Summarize this coding-agent conversation for another model that must continue the work. "
+        "Preserve concrete facts, user requirements, files and symbols touched, changes already made, "
+        "commands/tests and their outcomes, unresolved errors, active plan, and the next best action. "
+        "Do not invent facts. Use compact structured headings in the same language as the conversation.\n\n"
+        + "Runtime state:\n" + "\n".join(runtime_text)
+        + "\n\nConversation:\n" + transcript
+    )
+    payload = {
+        "messages": [
+            {
+                "role": "system",
+                "content": "You produce a reliable state handoff for a coding agent. Keep it factual and compact.",
+            },
+            {"role": "user", "content": summary_prompt},
+        ],
+        "max_tokens": max(256, min(int(max_summary_tokens), 4096)),
+        "temperature": 0.2,
+        "top_p": 0.9,
+        "stream": False,
+    }
+    try:
+        response = requests.post(
+            desktop_app.agent.api_url,
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=(10, 240),
+        )
+        response.raise_for_status()
+        data = response.json()
+        summary = str(
+            (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+            or data.get("content", "")
+        ).strip()
+    except Exception as exc:
+        return {"ok": False, "reason": f"Summarization failed: {exc}", "record": record}
+
+    if not summary:
+        return {"ok": False, "reason": "Model returned an empty summary", "record": record}
+
+    compacted_system = (
+        "## Compacted conversation context\n"
+        "The following is a trusted summary of earlier work. Treat it as context, not as a new user request.\n\n"
+        + summary
+    )
+    with chat_lock:
+        fresh_system = _default_agent_messages()[0]
+        desktop_app.agent.messages = [
+            fresh_system,
+            {"role": "system", "content": compacted_system},
+            *deepcopy(kept_messages),
+        ]
+        desktop_app.agent._invalidate_context_usage()
+
+    existing_ui = record.get("ui_messages") if isinstance(record.get("ui_messages"), list) else []
+    compacted_ui = [
+        {"role": "system", "body": "Контекст автоматически сжат. Старые сообщения сохранены в кратком резюме.", "images": []},
+        *deepcopy(existing_ui[-keep_last_n:]),
+    ]
+    saved = _save_chat_state(chat_id, ui_messages=compacted_ui)
+    return {"ok": True, "summary": summary, "record": saved, "kept_messages": len(kept_messages)}
 
 
 def _format_tool_payload_for_ui(payload: Any) -> str:
@@ -746,6 +1112,50 @@ def _normalize_ui_messages(
     if fallback and _ui_restore_score(fallback) >= _ui_restore_score(normalized):
         return fallback
     return normalized
+
+
+def _rebuild_agent_messages_from_ui(
+    ui_messages: List[Dict[str, Any]],
+    stop_before_index: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """Перестроить agent.messages из ui_messages.
+
+    Если stop_before_index задан, в историю включаются сообщения только до этого
+    индекса (нужно при редактировании: send_message сам добавит user-сообщение).
+    """
+    messages: List[Dict[str, Any]] = []
+    if desktop_app and desktop_app.agent and desktop_app.agent.messages:
+        messages.append(deepcopy(desktop_app.agent.messages[0]))
+    else:
+        messages.append({"role": "system", "content": ""})
+
+    upper = len(ui_messages) if stop_before_index is None else min(stop_before_index, len(ui_messages))
+    for entry in ui_messages[:upper]:
+        role = str(entry.get("role") or "system").strip().lower()
+        if role == "thinking":
+            continue
+        if role not in {"user", "assistant"}:
+            continue
+
+        body = str(entry.get("body") or entry.get("content") or entry.get("text") or "")
+        images = entry.get("images") if isinstance(entry.get("images"), list) else []
+
+        if role == "user":
+            content: Any = []
+            if body:
+                content.append({"type": "text", "text": body})
+            for image_url in images:
+                if isinstance(image_url, str) and image_url.startswith("data:image/"):
+                    content.append({"type": "image_url", "image_url": {"url": image_url}})
+            if len(content) == 1 and "text" in content[0]:
+                messages.append({"role": "user", "content": body})
+            elif content:
+                messages.append({"role": "user", "content": content})
+        else:
+            if body:
+                messages.append({"role": "assistant", "content": body})
+
+    return messages
 
 
 def _extract_message_preview(ui_messages: Optional[List[Dict[str, Any]]]) -> str:
@@ -1082,6 +1492,7 @@ def _load_chat_record(chat_id: str) -> Dict[str, Any]:
     data["id"] = _safe_chat_id(data.get("id") or chat_id)
     data["ui_messages"] = ui_messages
     data["agent_messages"] = agent_messages
+    data["runtime_state"] = _normalize_chat_runtime_state(data.get("runtime_state"))
     data["title_mode"] = _normalize_title_mode(data.get("title_mode"))
     data["preview"] = _extract_message_preview(ui_messages)
     existing_title = str(data.get("title") or "").strip()
@@ -1097,6 +1508,7 @@ def _write_chat_record(record: Dict[str, Any]) -> Dict[str, Any]:
     record = deepcopy(record)
     record["id"] = _safe_chat_id(record.get("id"))
     record["agent_messages"] = _normalize_agent_messages(record.get("agent_messages"))
+    record["runtime_state"] = _normalize_chat_runtime_state(record.get("runtime_state"))
     ui_messages = _normalize_ui_messages(record.get("ui_messages"), record["agent_messages"])
     record["ui_messages"] = ui_messages
     record["title_mode"] = _normalize_title_mode(record.get("title_mode"))
@@ -1159,6 +1571,12 @@ def _activate_chat(chat_id: str) -> Dict[str, Any]:
     record = _load_chat_record(chat_id)
     with chat_lock:
         desktop_app.agent.messages = deepcopy(record["agent_messages"])
+        runtime = _normalize_chat_runtime_state(record.get("runtime_state"))
+        desktop_app.agent.active_plan = deepcopy(runtime["active_plan"])
+        desktop_app.agent.working_directory = runtime["working_directory"]
+        desktop_app.agent.last_active_file_path = runtime["last_active_file_path"]
+        desktop_app.agent.refresh_system_prompt()
+        desktop_app.agent._invalidate_context_usage()
         active_chat_id = record["id"]
     return record
 
@@ -1176,6 +1594,7 @@ def _create_chat_record(title: Optional[str] = None) -> Dict[str, Any]:
         "last_message_at": now,
         "ui_messages": [],
         "agent_messages": _default_agent_messages(),
+        "runtime_state": _normalize_chat_runtime_state(None),
     }
     record = _write_chat_record(record)
     return _activate_chat(record["id"])
@@ -1193,6 +1612,7 @@ def _save_chat_state(chat_id: str, ui_messages: Optional[List[Dict[str, Any]]] =
             "created_at": _utc_now_iso(),
             "ui_messages": [],
             "agent_messages": _default_agent_messages(),
+            "runtime_state": _normalize_chat_runtime_state(None),
         }
 
     previous_ui_messages = deepcopy(existing.get("ui_messages", []))
@@ -1209,6 +1629,11 @@ def _save_chat_state(chat_id: str, ui_messages: Optional[List[Dict[str, Any]]] =
     if active_chat_id == chat_id:
         with chat_lock:
             existing["agent_messages"] = deepcopy(desktop_app.agent.messages)
+            existing["runtime_state"] = _normalize_chat_runtime_state({
+                "active_plan": desktop_app.agent.active_plan,
+                "working_directory": desktop_app.agent.working_directory,
+                "last_active_file_path": desktop_app.agent.last_active_file_path,
+            })
 
     ui_changed = _json_fingerprint(previous_ui_messages) != _json_fingerprint(existing.get("ui_messages", []))
     if existing["title_mode"] == TITLE_MODE_AUTO:
@@ -1372,6 +1797,38 @@ def _speak_assistant_response_async(response_text: str):
 def _extract_context_capacity() -> int:
     default_capacity = 18000
 
+    # 1. Конфигурация активного пресета — источник истины для UI.
+    # Runtime-агент может сохранить старый дефолт 32768 после смены пресета.
+    try:
+        config_status = config_manager.get_config_status()
+        active_index = int(config_status.get("active_preset_index", 0) or 0)
+        configured_presets = config_status.get("presets") or []
+        if 0 <= active_index < len(configured_presets):
+            configured_context = configured_presets[active_index].get("context_size")
+            configured_context = int(configured_context or 0)
+            if configured_context > 0:
+                return configured_context
+    except (TypeError, ValueError, AttributeError):
+        pass
+
+    # 2. Активный runtime-пресет — для MLX/optiq/mtplx тут лежит context_size.
+    try:
+        preset = desktop_app.get_selected_model_preset()
+        context_size = int(preset.get("context_size") or 0)
+        if context_size > 0:
+            return context_size
+    except Exception:
+        pass
+
+    # 2b. Fallback: agent уже знает свой context_size.
+    try:
+        agent_ctx = getattr(desktop_app.agent, "context_size", None)
+        if isinstance(agent_ctx, int) and agent_ctx > 0:
+            return agent_ctx
+    except Exception:
+        pass
+
+    # 2. llama-server: /props и /slots.
     try:
         response = requests.get(f"{desktop_app.agent.base_url}/props", timeout=2)
         response.raise_for_status()
@@ -1397,17 +1854,40 @@ def _extract_context_capacity() -> int:
     except Exception:
         pass
 
-    preset = desktop_app.get_selected_model_preset()
-    command = preset.get("command", "")
-    match = re.search(r"(?:^|\s)-c\s+(\d+)", command)
-    if match:
-        return int(match.group(1))
+    # 3. Резервный парсинг командной строки.
+    try:
+        preset = desktop_app.get_selected_model_preset()
+        command = preset.get("command", "")
+        for pattern in (
+            r"(?:^|\s)-c\s+(\d+)",
+            r"--max-context\s+(\d+)",
+            r"--context-window\s+(\d+)",
+            r"--max-seq-length\s+(\d+)",
+        ):
+            match = re.search(pattern, command)
+            if match:
+                return int(match.group(1))
+    except Exception:
+        pass
 
     return default_capacity
 
 
 def _estimate_context_used() -> int:
     agent = desktop_app.agent
+
+    # Если агент уже получал timings от сервера или fallback, используем
+    # точное значение prompt_n (+ предыдущий predicted_n) как оценку контекста.
+    exact = getattr(agent, "last_exact_context_tokens", None)
+    exact_fingerprint = getattr(agent, "last_exact_context_fingerprint", None)
+    if (
+        isinstance(exact, int)
+        and exact > 0
+        and exact_fingerprint
+        and exact_fingerprint == agent._context_history_fingerprint()
+    ):
+        return exact
+
     total = 0
 
     for message in getattr(agent, "messages", []):
@@ -1497,11 +1977,14 @@ class WebStreamBridge:
         self.originals: Dict[str, Any] = {}
         self.had_output = False
         self.last_content = ""
+        self.last_content_clean = ""
         self.last_thinking = ""
+        self.last_timings: Optional[Dict[str, Any]] = None
         self.tool_events: Dict[tuple, threading.Event] = {}
         self._tool_call_ids: Dict[tuple, str] = {}
 
     def push(self, event: str, **payload):
+        push_start = time.time()
         if event == "content_delta":
             self.last_content = payload.get("content", self.last_content) or self.last_content
         elif event == "thinking_delta":
@@ -1510,9 +1993,29 @@ class WebStreamBridge:
             self.last_thinking = payload.get("content", self.last_thinking) or self.last_thinking
         elif event == "final":
             self.last_content = payload.get("content", self.last_content) or self.last_content
+            self.last_content_clean = payload.get("content_clean", self.last_content) or self.last_content
+            self.last_timings = payload.get("timings")
         if event in {"thinking_delta", "thinking_block", "content_delta", "tool_call", "tool_result", "final"}:
             self.had_output = True
-        self.events.put(_make_json_safe({"event": event, **payload}))
+        item = _make_json_safe({"event": event, **payload})
+        self.events.put(item)
+        if event in {"content_delta", "thinking_delta"}:
+            try:
+                log_dir = Path(__file__).resolve().parent / "jarvis_logs"
+                log_dir.mkdir(exist_ok=True)
+                log_path = log_dir / "ui_perf_trace.jsonl"
+                entry = {
+                    "ts": push_start,
+                    "event": "bridge_push",
+                    "message_event": event,
+                    "queue_size": self.events.qsize(),
+                    "payload_chars": len(json.dumps(item, ensure_ascii=False)),
+                    "push_ms": round((time.time() - push_start) * 1000, 3),
+                }
+                with open(log_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
+            except Exception:
+                pass
 
     @contextmanager
     def patched(self):
@@ -1526,10 +2029,17 @@ class WebStreamBridge:
             "finish_streaming_response": UI.finish_streaming_response,
             "print_tool_call": UI.print_tool_call,
             "print_tool_result": UI.print_tool_result,
+            "start_streaming_tool_call": UI.start_streaming_tool_call,
+            "update_streaming_tool_call": UI.update_streaming_tool_call,
+            "finish_streaming_tool_call": UI.finish_streaming_tool_call,
+            "cancel_streaming_tool_call": UI.cancel_streaming_tool_call,
             "print_agent_status": UI.print_agent_status,
+            "print_prompt_progress": UI.print_prompt_progress,
+            "print_decode_progress": UI.print_decode_progress,
             "print_status": UI.print_status,
             "print_error": UI.print_error,
             "print_separator": UI.print_separator,
+            "print_plan_update": UI.print_plan_update,
             "anim_start": AnimationManager.start,
             "anim_start_bg": AnimationManager.start_bg,
             "anim_stop": AnimationManager.stop,
@@ -1561,15 +2071,24 @@ class WebStreamBridge:
         def finish_response(state):
             return state.get("buffer", "") if state else ""
 
-        def tool_call(tool_name, args, iteration):
+        def print_prompt_progress(percent):
+            self.push("prompt_progress", percent=int(percent))
+
+        def print_decode_progress(percent):
+            self.push("decode_progress", percent=int(percent))
+
+        def tool_call(tool_name, args, iteration, tool_call_id=None):
             # Нормализуем iteration: если None, используем 0 как дефолт
             iter_val = iteration if iteration is not None else 0
-            # Генерируем уникальный tool_call_id для надёжной связи tool_call -> tool_result
-            tool_call_id = f"tool-{tool_name}-{iter_val}-{uuid.uuid4().hex[:8]}"
+            # Используем переданный tool_call_id (из streaming native tool_calls) или генерируем свой
+            if not tool_call_id:
+                tool_call_id = f"tool-{tool_name}-{iter_val}-{uuid.uuid4().hex[:8]}"
             key = (tool_name, iter_val)
             stop_event = threading.Event()
             self.tool_events[key] = stop_event
             self._tool_call_ids[key] = tool_call_id
+            # Сохраняем текущий id для инструментов, которые хотят слать прогресс
+            state.current_tool_call_id = tool_call_id
             print(f"[DEBUG] tool_call: {tool_name}, iteration={iter_val}, key={key}, tool_call_id={tool_call_id}", file=sys.stderr)
             # Форматируем args для отображения на фронтенде (как JSON если это dict/объект)
             try:
@@ -1581,6 +2100,18 @@ class WebStreamBridge:
                 formatted_args = str(args)
             self.push("tool_call", tool_name=tool_name, args=args, args_formatted=formatted_args, iteration=iter_val, tool_call_id=tool_call_id)
             return stop_event
+
+        def start_streaming_tool_call(tool_call_id, tool_name_hint=""):
+            self.push("tool_call_start", tool_call_id=tool_call_id, tool_name=tool_name_hint)
+
+        def update_streaming_tool_call(tool_call_id, tool_name, arguments_json):
+            self.push("tool_call_delta", tool_call_id=tool_call_id, tool_name=tool_name, arguments_json=arguments_json)
+
+        def finish_streaming_tool_call(tool_call_id, tool_name, arguments_json):
+            self.push("tool_call_finish", tool_call_id=tool_call_id, tool_name=tool_name, arguments_json=arguments_json)
+
+        def cancel_streaming_tool_call(tool_call_id, tool_name="", reason=""):
+            self.push("tool_call_cancel", tool_call_id=tool_call_id, tool_name=tool_name or "tool", reason=reason or "cancelled")
 
         def tool_result(tool_name, result, iteration, stop_event=None):
             # Нормализуем iteration
@@ -1601,6 +2132,11 @@ class WebStreamBridge:
                             stop_event = self.tool_events.pop(k, None)
                             print(f"[DEBUG] tool_result: found event by fallback key {k}", file=sys.stderr)
                             break
+            else:
+                # execute_tool passes the event directly; remove the matching
+                # registry entry too, otherwise stale events accumulate and can
+                # be matched by a later tool call with the same name.
+                self.tool_events.pop(key, None)
 
             # Получаем tool_call_id по тому же ключу (точному или fallback)
             tool_call_id = self._tool_call_ids.pop(actual_key, None)
@@ -1620,6 +2156,9 @@ class WebStreamBridge:
             else:
                 print(f"[DEBUG] tool_result: WARNING - stop_event not found for key {key}", file=sys.stderr)
 
+            # Сбрасываем текущий id инструмента
+            state.current_tool_call_id = None
+
             # Корректная обработка result: может быть dict или объект с атрибутами
             if isinstance(result, dict):
                 success = bool(result.get("success", False))
@@ -1631,11 +2170,17 @@ class WebStreamBridge:
                 error = getattr(result, "error", None)
 
             result_images: List[str] = []
+            preview_error = None
             if success and isinstance(data, dict):
                 data_path = data.get("path")
-                preview_image = _image_file_to_data_url(data_path)
-                if preview_image:
-                    result_images.append(preview_image)
+                if data_path and isinstance(data_path, str):
+                    preview_image = _image_file_to_data_url(data_path)
+                    if preview_image:
+                        result_images.append(preview_image)
+                    else:
+                        mime_type, _ = mimetypes.guess_type(data_path)
+                        if mime_type and mime_type.startswith("image/"):
+                            preview_error = f"Preview unavailable: could not read image file {data_path}"
 
             # Отправляем событие на фронтенд
             self.push(
@@ -1643,9 +2188,9 @@ class WebStreamBridge:
                 tool_name=tool_name,
                 iteration=iter_val,
                 tool_call_id=tool_call_id,
-                success=success,
+                success=success and (not preview_error or bool(result_images)),
                 data=data,
-                error=error,
+                error=error or preview_error,
                 images=result_images,
             )
             print(f"[DEBUG] tool_result: pushed event, success={success}, tool_call_id={tool_call_id}", file=sys.stderr)
@@ -1659,6 +2204,9 @@ class WebStreamBridge:
         def error(message):
             self.push("error", message=message)
 
+        def plan_update(plan):
+            self.push("plan_update", plan=plan or None)
+
         UI.start_streaming_thinking = staticmethod(start_thinking)
         UI.update_streaming_thinking = staticmethod(update_thinking)
         UI.finish_streaming_thinking = staticmethod(finish_thinking)
@@ -1668,10 +2216,16 @@ class WebStreamBridge:
         UI.finish_streaming_response = staticmethod(finish_response)
         UI.print_tool_call = staticmethod(tool_call)
         UI.print_tool_result = staticmethod(tool_result)
+        UI.start_streaming_tool_call = staticmethod(start_streaming_tool_call)
+        UI.update_streaming_tool_call = staticmethod(update_streaming_tool_call)
+        UI.finish_streaming_tool_call = staticmethod(finish_streaming_tool_call)
         UI.print_agent_status = staticmethod(agent_status)
+        UI.print_prompt_progress = staticmethod(print_prompt_progress)
+        UI.print_decode_progress = staticmethod(print_decode_progress)
         UI.print_status = staticmethod(status)
         UI.print_error = staticmethod(error)
         UI.print_separator = staticmethod(lambda style="double": None)
+        UI.print_plan_update = staticmethod(plan_update)
 
         AnimationManager.start = classmethod(lambda cls, *args, **kwargs: None)
         AnimationManager.start_bg = classmethod(lambda cls, *args, **kwargs: None)
@@ -1692,10 +2246,17 @@ class WebStreamBridge:
             UI.finish_streaming_response = self.originals["finish_streaming_response"]
             UI.print_tool_call = self.originals["print_tool_call"]
             UI.print_tool_result = self.originals["print_tool_result"]
+            UI.start_streaming_tool_call = self.originals["start_streaming_tool_call"]
+            UI.update_streaming_tool_call = self.originals["update_streaming_tool_call"]
+            UI.finish_streaming_tool_call = self.originals["finish_streaming_tool_call"]
+            UI.cancel_streaming_tool_call = self.originals["cancel_streaming_tool_call"]
             UI.print_agent_status = self.originals["print_agent_status"]
+            UI.print_prompt_progress = self.originals["print_prompt_progress"]
+            UI.print_decode_progress = self.originals["print_decode_progress"]
             UI.print_status = self.originals["print_status"]
             UI.print_error = self.originals["print_error"]
             UI.print_separator = self.originals["print_separator"]
+            UI.print_plan_update = self.originals["print_plan_update"]
             AnimationManager.start = self.originals["anim_start"]
             AnimationManager.start_bg = self.originals["anim_start_bg"]
             AnimationManager.stop = self.originals["anim_stop"]
@@ -1750,6 +2311,7 @@ def api_create_preset(request: PresetCreateRequest):
     reload_llama_server_presets()
     active_index = status.get("active_preset_index", 0)
     desktop_app.selected_model_key = f"preset_{active_index}"
+    desktop_app._sync_agent_base_url()
     _update_agent_tools_from_status(status)
     return {"ok": True, **status}
 
@@ -1763,6 +2325,7 @@ def api_select_preset(request: PresetSelectRequest):
 
     reload_llama_server_presets()
     desktop_app.selected_model_key = f"preset_{request.preset_index}"
+    desktop_app._sync_agent_base_url()
     _update_agent_tools_from_status(status)
     return {"ok": True, **status}
 
@@ -1777,6 +2340,7 @@ def api_delete_preset(request: PresetDeleteRequest):
     reload_llama_server_presets()
     if status.get("active_preset_key"):
         desktop_app.selected_model_key = status["active_preset_key"]
+        desktop_app._sync_agent_base_url()
     _update_agent_tools_from_status(status)
     return {"ok": True, **status}
 
@@ -1808,6 +2372,30 @@ def api_tools():
     return {"ok": True, "tools": tools}
 
 
+@app.get("/api/background-tasks")
+def api_background_tasks():
+    result = list_background_tasks()
+    return {"ok": result.success, **(result.data or {}), "error": result.error}
+
+
+@app.get("/api/active-plan")
+def api_active_plan():
+    agent = desktop_app.agent
+    return {
+        "ok": True,
+        "active_plan": agent.active_plan,
+        "working_directory": agent.working_directory,
+    }
+
+
+@app.post("/api/background-tasks/stop")
+def api_stop_background_task(request: BackgroundTaskStopRequest):
+    result = stop_background_task(task_id=request.task_id, pid=request.pid)
+    if not result.success:
+        raise HTTPException(status_code=404, detail=result.error or "Background task not found")
+    return {"ok": True, **(result.data or {})}
+
+
 @app.get("/api/health")
 def api_health():
     preset_info = _selected_preset_payload()
@@ -1833,6 +2421,16 @@ def api_health():
         "voice_backend_available": bool(current_asr.get("available", False)),
         "voice_backend_reason": current_asr.get("reason", ""),
         "active_chat_id": active_chat_id,
+    }
+
+
+@app.get("/api/system-check")
+def api_system_check():
+    """Вернуть список системных проблем и недостающих разрешений."""
+    return {
+        "ok": True,
+        "issues": _run_system_checks(),
+        "is_macos": IS_MACOS,
     }
 
 
@@ -1898,6 +2496,76 @@ def api_save_chat_state(chat_id: str, request: ChatStateRequest):
     }
 
 
+@app.post("/api/chats/{chat_id}/edit-message")
+def api_edit_message(chat_id: str, request: EditMessageRequest):
+    chat_id = _safe_chat_id(chat_id)
+
+    with active_stream_lock:
+        if active_stream_bridge is not None:
+            raise HTTPException(status_code=409, detail="Generation is in progress. Please stop it first.")
+
+    record = _load_chat_record(chat_id)
+    ui_messages = list(record.get("ui_messages") or [])
+
+    if request.message_index >= len(ui_messages):
+        raise HTTPException(status_code=400, detail="Invalid message index")
+
+    target = ui_messages[request.message_index]
+    if str(target.get("role") or "").lower() != "user":
+        raise HTTPException(status_code=400, detail="Only user messages can be edited")
+
+    new_text = request.new_text.strip()
+    if not new_text:
+        raise HTTPException(status_code=400, detail="Message text cannot be empty")
+
+    target["body"] = new_text
+    ui_messages = ui_messages[: request.message_index + 1]
+
+    _activate_chat(chat_id)
+    desktop_app.agent.messages = _rebuild_agent_messages_from_ui(ui_messages, stop_before_index=request.message_index)
+    desktop_app.agent.active_plan = None
+    desktop_app.agent.refresh_system_prompt()
+    desktop_app.agent._invalidate_context_usage()
+
+    record = _save_chat_state(chat_id, ui_messages=ui_messages)
+    return {
+        "ok": True,
+        "chat": _chat_summary(record),
+        "active_chat_id": record["id"],
+    }
+
+
+@app.post("/api/chats/{chat_id}/summarize")
+def api_summarize_chat(chat_id: str, request: SummarizeChatRequest):
+    chat_id = _safe_chat_id(chat_id)
+    _activate_chat(chat_id)
+
+    with active_stream_lock:
+        if active_stream_bridge is not None:
+            raise HTTPException(status_code=409, detail="Generation is in progress. Please stop it first.")
+
+    if not desktop_app.agent.check_health():
+        raise HTTPException(status_code=503, detail="LLM server is offline. Start a model first.")
+
+    result = _compact_chat_context(
+        chat_id,
+        keep_last_n=request.keep_last_n,
+        max_summary_tokens=request.max_summary_tokens,
+    )
+    if not result.get("ok"):
+        reason = result.get("reason") or "Summarization failed"
+        status_code = 400 if reason == "Nothing to summarize" else 502
+        raise HTTPException(status_code=status_code, detail=reason)
+    record = result["record"]
+
+    return {
+        "ok": True,
+        "summary": result["summary"],
+        "chat": _chat_summary(record),
+        "active_chat_id": record["id"],
+    }
+
+
 @app.get("/api/models")
 def api_models():
     models = []
@@ -1909,8 +2577,55 @@ def api_models():
             "supports_images": bool(preset.get("supports_images", False)),
             "selected": key == desktop_app.selected_model_key,
             "config_index": preset.get("config_index"),
+            "backend": preset.get("backend", "llama-server"),
         })
     return {"models": models}
+
+
+@app.get("/api/models/local")
+def api_local_models():
+    """Вернуть список локальных MLX/HF моделей для автообнаружения."""
+    try:
+        from jarvis_mlx.discovery import discover_models
+        models = [{"path": str(m), "name": m.name} for m in discover_models()]
+        return {"ok": True, "models": models}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/models/download")
+def api_download_model(request: DownloadModelRequest):
+    """Скачать модель с HuggingFace с прогрессом через SSE."""
+    import json
+    from fastapi.responses import StreamingResponse
+    from jarvis_mlx.downloader import download_model
+
+    repo_id = request.repo_id.strip()
+    if not repo_id:
+        raise HTTPException(status_code=400, detail="repo_id не указан")
+
+    local_dir = request.local_dir.strip() or None
+
+    def event_stream():
+        def progress_cb(message, downloaded, total, percent, speed, eta):
+            chunk = {
+                "type": "progress",
+                "message": message,
+                "downloaded": downloaded,
+                "total": total,
+                "percent": percent,
+                "speed": speed,
+                "eta": eta,
+            }
+            yield f"data: {json.dumps(chunk)}\n\n"
+
+        try:
+            path = download_model(repo_id, local_dir=local_dir, progress_callback=progress_cb, hf_token=request.hf_token)
+            yield f"data: {json.dumps({'type': 'done', 'path': path})}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @app.get("/api/asr/backends")
@@ -1933,6 +2648,95 @@ def api_context():
     return _build_context_payload()
 
 
+@app.get("/api/benchmark")
+def api_benchmark(prompt: str = "Explain quantum computing in simple terms.", max_tokens: int = 128):
+    """Простой бенчмарк скорости генерации активного LLM-сервера.
+
+    Отправляет минимальный chat-запрос и замеряет время до первого токена
+    и скорость decode. Помогает отделить проблемы Jarvis от проблем сервера.
+    """
+    if not desktop_app.agent.check_health():
+        raise HTTPException(status_code=503, detail="LLM server offline")
+
+    base_url = desktop_app.agent.base_url
+    api_url = f"{base_url}/v1/chat/completions"
+    payload: Dict[str, Any] = {
+        "messages": [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": prompt},
+        ],
+        "max_tokens": max(1, min(int(max_tokens), 1024)),
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "stream": True,
+        "stream_options": {"include_usage": True},
+    }
+
+    # Для MLX/OptiQ убираем stream_options, т.к. многие сборки его не принимают.
+    backend = getattr(desktop_app.agent, "backend", "llama-server")
+    if backend in {"mlx-vlm", "mlx-optiq", "mtplx"}:
+        payload.pop("stream_options", None)
+
+    start = time.time()
+    first_token_time: Optional[float] = None
+    token_count = 0
+    finish_reason: Optional[str] = None
+    timings: Optional[Dict[str, Any]] = None
+    usage: Optional[Dict[str, Any]] = None
+
+    try:
+        response = requests.post(api_url, json=payload, stream=True, timeout=(10, 120))
+        response.raise_for_status()
+        for raw_line in response.iter_lines():
+            if not raw_line:
+                continue
+            try:
+                line = raw_line.decode("utf-8").strip()
+            except UnicodeDecodeError:
+                continue
+            if not line.startswith("data:"):
+                continue
+            data_str = line[5:].strip()
+            if not data_str or data_str == "[DONE]":
+                break
+            try:
+                event = json.loads(data_str)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(event.get("timings"), dict):
+                timings = event["timings"]
+            if isinstance(event.get("usage"), dict):
+                usage = event["usage"]
+            choice = (event.get("choices") or [{}])[0]
+            delta = choice.get("delta") or {}
+            if delta.get("content") or delta.get("reasoning_content") or delta.get("reasoning"):
+                if first_token_time is None:
+                    first_token_time = time.time()
+                token_count += 1
+            finish_reason = choice.get("finish_reason") or finish_reason
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Benchmark failed: {exc}") from exc
+
+    end = time.time()
+    prefill_ms = (first_token_time - start) * 1000.0 if first_token_time else None
+    decode_ms = (end - first_token_time) * 1000.0 if first_token_time else (end - start) * 1000.0
+    decode_tokens = token_count if token_count > 0 else (usage.get("completion_tokens") if usage else 0)
+    decode_tps = decode_tokens / (decode_ms / 1000.0) if decode_ms and decode_tokens else 0.0
+
+    return {
+        "ok": True,
+        "backend": backend,
+        "api_url": api_url,
+        "total_seconds": round(end - start, 2),
+        "prefill_ms": round(prefill_ms, 1) if prefill_ms else None,
+        "decode_tokens": decode_tokens,
+        "decode_tps": round(decode_tps, 1),
+        "finish_reason": finish_reason,
+        "server_timings": timings,
+        "server_usage": usage,
+    }
+
+
 @app.post("/api/server/start")
 def api_start_model(request: StartModelRequest):
     if request.model_key not in desktop_app.get_model_presets():
@@ -1944,6 +2748,7 @@ def api_start_model(request: StartModelRequest):
         try:
             config_manager.select_preset_index(int(config_index))
             reload_llama_server_presets()
+            desktop_app._sync_agent_base_url()
         except ValueError:
             pass
 
@@ -2130,6 +2935,106 @@ def api_voice_reset():
     return {"ok": True, **state}
 
 
+@app.post("/api/voice/record_message/start")
+def api_voice_record_message_start():
+    """Start a manual voice-message recording; transcription happens on stop."""
+    global voice_message_session
+
+    with voice_message_session_lock:
+        if voice_message_session is not None:
+            return {"ok": True, "recording": True}
+
+        activator = getattr(desktop_app, "voice_activator", None)
+        voice_was_running = False
+        if activator is not None:
+            try:
+                voice_was_running = bool(getattr(activator, "is_running", False))
+                if voice_was_running:
+                    activator.stop_listening()
+            except Exception:
+                pass
+
+        backend = _get_selected_asr_backend()
+        stop_event = threading.Event()
+        session: Dict[str, Any] = {
+            "stop_event": stop_event,
+            "thread": None,
+            "result": None,
+            "voice_was_running": voice_was_running,
+            "activator": activator,
+        }
+
+        def worker() -> None:
+            session["result"] = record_voice_message(
+                backend_key=backend.get("key"),
+                max_duration=300.0,
+                stop_event=stop_event,
+            )
+
+        thread = threading.Thread(target=worker, daemon=True, name="VoiceMessageRecorder")
+        session["thread"] = thread
+        voice_message_session = session
+        thread.start()
+
+    return {"ok": True, "recording": True, "backend": backend.get("key")}
+
+
+@app.post("/api/voice/record_message/stop")
+def api_voice_record_message_stop():
+    """Stop the manual recording and return the complete transcription."""
+    global voice_message_session
+
+    with voice_message_session_lock:
+        session = voice_message_session
+        if session is None:
+            return {"ok": False, "error": "Запись не запущена"}
+        session["stop_event"].set()
+
+    thread = session.get("thread")
+    if thread is not None:
+        thread.join(timeout=8.0)
+
+    result = session.get("result")
+    if result is None:
+        result = {"ok": False, "error": "Расшифровка ещё выполняется"}
+
+    activator = session.get("activator")
+    if session.get("voice_was_running") and activator is not None:
+        try:
+            activator.start_listening()
+        except Exception:
+            pass
+
+    with voice_message_session_lock:
+        voice_message_session = None
+
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=result.get("error", "Voice recording failed"))
+    return {**result, "recording": False}
+
+
+@app.post("/api/voice/download_model")
+def api_voice_download_model():
+    """Скачать малую модель Vosk, если её ещё нет."""
+    target_dir = os.path.join(os.path.expanduser("~"), ".vosk-models")
+    model_path = os.path.join(target_dir, VOSK_MODEL_NAME)
+    if os.path.exists(model_path):
+        return {"ok": True, "downloaded": False, "path": model_path, "message": "Model already exists"}
+    _update_voice_state(model_downloading=True)
+    try:
+        success = download_vosk_model(target_dir)
+        if success and os.path.exists(model_path):
+            _update_voice_state(model_missing=False, model_downloading=False)
+            return {"ok": True, "downloaded": True, "path": model_path, "message": "Model downloaded successfully"}
+        raise HTTPException(status_code=500, detail="Failed to download Vosk model")
+    except HTTPException:
+        _update_voice_state(model_downloading=False)
+        raise
+    except Exception as exc:
+        _update_voice_state(model_downloading=False)
+        raise HTTPException(status_code=500, detail=f"Download error: {exc}")
+
+
 @app.post("/api/chat")
 def api_chat(request: ChatRequest):
     target_chat_id = request.chat_id or active_chat_id
@@ -2155,7 +3060,7 @@ def api_chat(request: ChatRequest):
             image_urls=images
         )
 
-    _speak_assistant_response_async(result.get("content", ""))
+    _speak_assistant_response_async(result.get("content_clean", result.get("content", "")))
 
     return {
         "ok": True,
@@ -2188,7 +3093,40 @@ def api_chat_stream(request: ChatRequest):
             global active_stream_bridge
             with active_stream_lock:
                 active_stream_bridge = bridge
+
+            def image_progress_handler(tool_call_id, percent):
+                bridge.push("image_progress", tool_call_id=tool_call_id, percent=int(percent))
+
+            state.image_progress_handler = image_progress_handler
+
             with chat_lock:
+                # Compact before the next model request, while the current
+                # history is still available and no generation is running.
+                if target_chat_id:
+                    context_before = _build_context_payload()
+                    estimated_next = int(context_before.get("used", 0)) + desktop_app.agent._estimate_tokens(message)
+                    if estimated_next > AUTO_COMPACTION_THRESHOLD:
+                        bridge.push(
+                            "context_compaction_start",
+                            used=estimated_next,
+                            capacity=context_before.get("capacity", 0),
+                        )
+                        compacted = _compact_chat_context(
+                            target_chat_id,
+                            keep_last_n=AUTO_COMPACTION_KEEP_MESSAGES,
+                            max_summary_tokens=2048,
+                        )
+                        if compacted.get("ok"):
+                            bridge.push(
+                                "context_compaction_done",
+                                kept_messages=compacted.get("kept_messages", 0),
+                            )
+                        else:
+                            bridge.push(
+                                "context_compaction_error",
+                                message=compacted.get("reason", "Не удалось сжать контекст"),
+                            )
+
                 with bridge.patched():
                     try:
                         for result in desktop_app.agent.send_message(
@@ -2202,16 +3140,22 @@ def api_chat_stream(request: ChatRequest):
                                 bridge.push(
                                     "final",
                                     content=final_content,
+                                    content_clean=result.get("content_clean", final_content),
+                                    timings=result.get("timings"),
                                     iterations=result.get("iterations", 0),
                                 )
                     except Exception as exc:
                         error_message = str(exc)
+                        print(
+                            f"[ChatStream] Агентский цикл прерван: {type(exc).__name__}: {error_message}",
+                            file=sys.stderr,
+                        )
                         if "Assistant response prefill is incompatible with enable_thinking" in error_message:
                             fallback_content = (bridge.last_content or "").strip()
                             if not fallback_content:
                                 fallback_content = (bridge.last_thinking or "").strip()
                             if fallback_content:
-                                bridge.push("final", content=fallback_content, iterations=0)
+                                bridge.push("final", content=fallback_content, content_clean=fallback_content, iterations=0)
                             # Harmless llama.cpp fallback after tool use: do not surface as a user-facing error.
                         else:
                             bridge.push("error", message=error_message)
@@ -2219,9 +3163,13 @@ def api_chat_stream(request: ChatRequest):
                         with active_stream_lock:
                             if active_stream_bridge is bridge:
                                 active_stream_bridge = None
+                        # Cancel any ask_user prompt left hanging when the stream ends.
+                        cancel_all_user_prompts()
+                        state.image_progress_handler = None
+                        state.current_tool_call_id = None
                         if target_chat_id:
                             _save_chat_state(target_chat_id)
-                        final_content_for_tts = (bridge.last_content or "").strip()
+                        final_content_for_tts = (bridge.last_content_clean or "").strip()
                         if final_content_for_tts:
                             _speak_assistant_response_async(final_content_for_tts)
                         # Очищаем оставшиеся события инструментов при завершении сессии
@@ -2241,11 +3189,37 @@ def api_chat_stream(request: ChatRequest):
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
+@app.post("/api/log_frontend_perf")
+def api_log_frontend_perf(payload: Dict[str, Any]):
+    """Принимает frontend performance trace события и пишет в JSONL."""
+    try:
+        log_dir = Path(__file__).resolve().parent / "jarvis_logs"
+        log_dir.mkdir(exist_ok=True)
+        log_path = log_dir / "frontend_perf_trace.jsonl"
+        entry = {
+            "ts": time.time(),
+            "client_ts": payload.get("ts"),
+            "event": payload.get("event"),
+            "data": payload.get("data"),
+        }
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
+    except Exception:
+        pass
+    return {"ok": True}
+
+
 @app.post("/api/chat/stop")
 def api_chat_stop():
+    global active_stream_bridge
     desktop_app.agent.request_stop()
+    # Cancel any open ask_user prompt so the agent doesn't hang waiting for a
+    # user answer until the full timeout expires.
+    cancel_all_user_prompts()
     with active_stream_lock:
         is_active = active_stream_bridge is not None
+        if active_stream_bridge is not None:
+            active_stream_bridge = None
     return {"ok": True, "stopping": is_active}
 
 
@@ -2358,6 +3332,88 @@ def _on_window_closing():
 atexit.register(shutdown_resources)
 
 
+def _run_git(args: List[str], cwd: str, timeout: float = 30.0) -> subprocess.CompletedProcess:
+    """Run a git command and return its result."""
+    return subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
+
+
+@app.get("/api/update/check")
+def api_check_update():
+    """Check whether a newer version is available on the remote origin."""
+    base_dir = Path(__file__).resolve().parent
+    try:
+        fetch_result = _run_git(["fetch", "origin", "--depth=1"], str(base_dir), timeout=20.0)
+        if fetch_result.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"git fetch failed: {fetch_result.stderr.strip()}")
+
+        local_result = _run_git(["rev-parse", "HEAD"], str(base_dir), timeout=5.0)
+        remote_result = _run_git(["rev-parse", "origin/main"], str(base_dir), timeout=5.0)
+        if local_result.returncode != 0 or remote_result.returncode != 0:
+            raise HTTPException(status_code=500, detail="Unable to resolve current or remote revision")
+
+        current = local_result.stdout.strip()
+        latest = remote_result.stdout.strip()
+        return {
+            "ok": True,
+            "available": current != latest and bool(latest),
+            "current": current,
+            "latest": latest,
+        }
+    except HTTPException:
+        raise
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Git operation timed out")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Update check failed: {exc}")
+
+
+@app.post("/api/update/apply")
+def api_apply_update():
+    """Pull the latest version from origin and restart the application."""
+    base_dir = Path(__file__).resolve().parent
+    check = api_check_update()
+    if not check.get("available"):
+        return {"ok": True, "restarted": False, "reason": "No update available"}
+
+    try:
+        pull_result = _run_git(["pull", "origin", "main"], str(base_dir), timeout=60.0)
+        if pull_result.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"git pull failed: {pull_result.stderr.strip()}")
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="git pull timed out")
+
+    updater_path = base_dir / "updater.py"
+    if not updater_path.exists():
+        raise HTTPException(status_code=500, detail="Updater script not found")
+
+    try:
+        subprocess.Popen(
+            [sys.executable, str(updater_path), str(os.getpid()), str(base_dir)],
+            cwd=str(base_dir),
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to start updater: {exc}")
+
+    # Shutdown resources and exit so the updater can replace this process.
+    def _delayed_exit():
+        time.sleep(0.5)
+        shutdown_resources()
+        os._exit(0)
+
+    threading.Thread(target=_delayed_exit, daemon=True).start()
+    return {"ok": True, "restarted": True}
+
+
 @app.post("/api/shutdown")
 def api_shutdown():
     """Release resources and shut down llama-server gracefully."""
@@ -2377,6 +3433,7 @@ def main():
     status = config_manager.get_config_status()
     if status.get("active_preset_key"):
         desktop_app.selected_model_key = status["active_preset_key"]
+        desktop_app._sync_agent_base_url()
         _update_agent_tools_from_status(status)
 
     backend_thread = threading.Thread(target=run_backend, daemon=True)

@@ -1,5 +1,7 @@
 """File-system and code-editing tools."""
+import getpass
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from jarvis_core.types import ToolResult
@@ -11,44 +13,9 @@ from .utils import (
     _normalize_code_for_compare,
     _normalize_search_queries,
     _read_text_file_lines,
+    _strip_read_code_line_numbers,
 )
 
-
-def read_file(path: str) -> ToolResult:
-    """Прочитать файл"""
-    try:
-        if not os.path.exists(path):
-            return ToolResult(False, None, f"File not found: {path}")
-
-        # Пробуем разные кодировки
-        encodings = ['utf-8', 'cp1251', 'cp866', 'latin-1']
-        content = None
-
-        for encoding in encodings:
-            try:
-                with open(path, "r", encoding=encoding) as f:
-                    content = f.read()
-                break
-            except UnicodeDecodeError:
-                continue
-
-        if content is None:
-            # Если текст не прочитался - читаем как бинарный
-            with open(path, "rb") as f:
-                content = f.read()[:5000].decode('utf-8', errors='replace')
-
-        max_chars = 5000
-        truncated = len(content) > max_chars
-        return ToolResult(True, {
-            "path": path,
-            "content": content[:max_chars],
-            "total_chars": len(content),
-            "returned_chars": min(len(content), max_chars),
-            "truncated": truncated,
-            "note": "Content is truncated; use read_code for code files or long files." if truncated else ""
-        })
-    except Exception as e:
-        return ToolResult(False, None, f"Read error: {str(e)}")
 
 def search_text_in_file(path: str, query: Any, threshold: float = 0.6,
                         max_results: int = 20, case_sensitive: bool = False) -> ToolResult:
@@ -184,15 +151,24 @@ def read_code(path: str, start_line: int = 1, end_line: Optional[int] = None,
     """Умное чтение кода — читает файл построчно или только нужные символы.
 
     Экономит токены: не читает весь файл целиком.
+    Возвращаемый `content` содержит номера строк, чтобы удобно было вызывать edit_code.
 
     Args:
         path: Путь к файлу
-        start_line: Начальная строка (1-индексация)
+        start_line: Начальная строка (1-индексация). Может прийти строкой — приведётся к int.
         end_line: Конечная строка (включительно). Если None — до max_lines
-        max_lines: Максимальное количество строк для чтения (по умолчанию 200)
+        max_lines: Максимальное количество lines для чтения (по умолчанию 200)
         symbols: Список символов для поиска (имена функций/классов). Если указан — игнорирует start_line/end_line
     """
     try:
+        # Приведение типов: модель иногда передаёт строки вместо int
+        try:
+            start_line = int(start_line) if start_line is not None else 1
+            max_lines = int(max_lines) if max_lines is not None else 200
+            end_line = int(end_line) if end_line is not None else None
+        except (TypeError, ValueError) as e:
+            return ToolResult(False, None, f"Invalid line number argument: {e}")
+
         if not os.path.exists(path):
             return ToolResult(False, None, f"File not found: {path}")
 
@@ -211,6 +187,14 @@ def read_code(path: str, start_line: int = 1, end_line: Optional[int] = None,
 
         total_lines = len(lines)
 
+        def _with_line_numbers(start_idx: int, end_idx: int) -> str:
+            """Добавить номера lines к контенту."""
+            width = len(str(end_idx))
+            parts = []
+            for idx in range(start_idx, end_idx):
+                parts.append(f"{idx + 1:{width}d}| {lines[idx]}")
+            return "".join(parts)
+
         # Режим поиска символов
         if symbols:
             found_ranges = []
@@ -219,7 +203,7 @@ def read_code(path: str, start_line: int = 1, end_line: Optional[int] = None,
                     if sym in line and (line.strip().startswith('def ') or
                                         line.strip().startswith('class ') or
                                         line.strip().startswith('async def ')):
-                        # Нашли символ — берём контекст: от текущего отступ и до 30 строк вниз или до следующего def/class
+                        # Нашли символ — берём контекст: от текущего отступ и до 30 lines вниз или до следующего def/class
                         start = max(0, i - 2)  # 2 строки контекста сверху
                         end = min(total_lines, i + 30)  # максимум 30 строк
                         # Продлеваем до следующего определения
@@ -245,7 +229,7 @@ def read_code(path: str, start_line: int = 1, end_line: Optional[int] = None,
 
             if not found_ranges:
                 return ToolResult(False, None,
-                                  f"Символы {symbols} не найдены в файле ({total_lines} строк)")
+                                  f"Symbols {symbols} not found in file ({total_lines} lines)")
 
             # Объединяем пересекающиеся диапазоны
             found_ranges.sort()
@@ -259,7 +243,7 @@ def read_code(path: str, start_line: int = 1, end_line: Optional[int] = None,
             result_lines = []
             for s, e in merged:
                 result_lines.append(f"--- строки {s + 1}-{e} ---\n")
-                result_lines.extend(lines[s:e])
+                result_lines.append(_with_line_numbers(s, e))
 
             return ToolResult(True, {
                 "path": path,
@@ -274,9 +258,9 @@ def read_code(path: str, start_line: int = 1, end_line: Optional[int] = None,
         end = min(total_lines, start + max_lines) if end_line is None else min(total_lines, end_line)
         actual_lines = end - start
 
-        content = "".join(lines[start:end])
+        content = _with_line_numbers(start, end)
 
-        # Показываем контекст: сколько строк в файле всего и какие прочитаны
+        # Показываем контекст: сколько lines в файле всего и какие прочитаны
         return ToolResult(True, {
             "path": path,
             "total_lines": total_lines,
@@ -493,8 +477,9 @@ def check_syntax(path: str) -> ToolResult:
     except Exception as e:
         return ToolResult(False, None, f"Syntax check error: {str(e)}")
 
-def edit_code(path: str, line: int, new_code: str = "", mode: str = "replace",
-              end_line: Optional[int] = None, expected_old_code: Optional[str] = None) -> ToolResult:
+def edit_code(path: str, line: Optional[int] = None, new_code: str = "", mode: str = "replace",
+              end_line: Optional[int] = None, expected_old_code: Optional[str] = None,
+              allow_large_replace: bool = False) -> ToolResult:
     """Изменение кода в файле по номеру строки.
 
     Режимы:
@@ -505,12 +490,27 @@ def edit_code(path: str, line: int, new_code: str = "", mode: str = "replace",
 
     Args:
         path: Путь к файлу
-        line: Номер строки (1-индексация)
+        line: Номер строки (1-индексация). Может прийти строкой — приведётся к int.
+              Если передан expected_old_code для replace/delete, line можно не указывать —
+              блок будет найден автоматически.
         new_code: Новый код для вставки/замены (не требуется для режима delete)
         mode: Режим (replace, insert_before, insert_after, delete)
         end_line: Конечная строка диапазона (для replace/delete)
+        expected_old_code: Текущий код, который должен быть заменён/удалён.
+                           Если указан — edit_code попытается найти его в файле
+                           и проигнорирует line/end_line.
+        allow_large_replace: Разрешить явно подтверждённую большую замену.
+                              По умолчанию большие замены защищены от случайной
+                              передачи всего файла вместо небольшого фрагмента.
     """
     try:
+        # Приведение типов
+        try:
+            line = int(line) if line is not None else None
+            end_line = int(end_line) if end_line is not None else None
+        except (TypeError, ValueError) as e:
+            return ToolResult(False, None, f"Invalid line number argument: {e}")
+
         mode = str(mode or "replace").strip().lower()
 
         # Для режимов вставки/замены нужен new_code
@@ -542,37 +542,48 @@ def edit_code(path: str, line: int, new_code: str = "", mode: str = "replace",
             return ToolResult(False, None, f"Failed to read file: encoding not recognized")
 
         total_lines = len(lines)
+        relocated = False
+
+        # Авто-поиск по expected_old_code для replace/delete
+        if expected_old_code is not None and mode in ("replace", "delete"):
+            located = _locate_code_block(lines, expected_old_code)
+            if located is not None:
+                located_start, located_end = located
+                if line is not None and (line, end_line or line) != (located_start, located_end):
+                    relocated = True
+                line, end_line = located_start, located_end
+
+        if line is None:
+            return ToolResult(
+                False, None,
+                "Missing required argument: line. Provide line number or expected_old_code for replace/delete."
+            )
 
         if line < 1 or line > total_lines:
             return ToolResult(False, None,
-                              f"Строка {line} вне диапазона (файл имеет {total_lines} строк)")
+                              f"Line {line} out of range (file has {total_lines} lines)")
 
         if end_line is not None and (end_line < line or end_line > total_lines):
             return ToolResult(False, None,
-                              f"end_line {end_line} вне диапазона (файл имеет {total_lines} строк)")
+                              f"end_line {end_line} out of range (file has {total_lines} lines)")
 
-        if expected_old_code is not None and mode in ("replace", "delete"):
+        # Если авто-поиск не сработал, но expected_old_code передан — проверяем совпадение вручную
+        if expected_old_code is not None and mode in ("replace", "delete") and not relocated:
             candidate_end = end_line if end_line is not None else line
             current_code = "".join(lines[line - 1:candidate_end])
-            expected_normalized = _normalize_code_for_compare(expected_old_code)
+            expected_normalized = _normalize_code_for_compare(_strip_read_code_line_numbers(expected_old_code))
             current_normalized = _normalize_code_for_compare(current_code)
 
             if current_normalized != expected_normalized:
-                located = _locate_code_block(lines, expected_old_code)
-                if located is not None:
-                    line, relocated_end_line = located
-                    if end_line is not None or mode == "delete":
-                        end_line = relocated_end_line
-                else:
-                    preview = current_code.rstrip()[:600] or "(empty)"
-                    return ToolResult(
-                        False,
-                        None,
-                        "Edit aborted: the code at the requested lines no longer matches 'expected_old_code'. "
-                        "Read the file again and retry with fresh line numbers.\n\n"
-                        f"Requested lines: {line}-{candidate_end}\n"
-                        f"Current code there:\n{preview}"
-                    )
+                preview = current_code.rstrip()[:600] or "(empty)"
+                return ToolResult(
+                    False,
+                    None,
+                    "Edit aborted: the code at the requested lines no longer matches 'expected_old_code'. "
+                    "Read the file again and retry with fresh line numbers.\n\n"
+                    f"Requested lines: {line}-{candidate_end}\n"
+                    f"Current code there:\n{preview}"
+                )
 
         # Сохраняем старый код для показа изменений
         if mode == "delete":
@@ -595,6 +606,41 @@ def edit_code(path: str, line: int, new_code: str = "", mode: str = "replace",
             old_lines = lines[line - 1:el]
             old_code = "".join(old_lines)
             replacement_lines = _code_text_to_lines(new_code)
+
+            # Защита от типичной ошибки модели: замена 1–5 lines полным
+            # содержимым файла. Для намеренной большой замены нужен явный
+            # allow_large_replace=true (либо следует использовать write_file).
+            old_line_count = len(old_lines)
+            new_line_count = len(replacement_lines)
+            first_file_line = next((candidate.strip() for candidate in lines if candidate.strip()), "")
+            replacement_head = "".join(replacement_lines[:25])
+            looks_like_file_prefix = (
+                line > 1
+                and bool(first_file_line)
+                and first_file_line in replacement_head
+            )
+            suspicious_large_replace = (
+                old_line_count <= 10
+                and new_line_count >= 25
+                and new_line_count > old_line_count * 5
+            )
+            if not allow_large_replace and (suspicious_large_replace or looks_like_file_prefix):
+                reason = (
+                    "replacement starts with content from the top of the file"
+                    if looks_like_file_prefix
+                    else "replacement is much larger than the selected range"
+                )
+                return ToolResult(
+                    False,
+                    None,
+                    "Edit blocked for safety: attempted to replace "
+                    f"{old_line_count} line(s) with a block of {new_line_count} lines "
+                    f"({reason}). "
+                    "It looks like the entire file was passed in new_code instead of a small fragment. "
+                    "Re-read the target range and pass only the code to be replaced. "
+                    "For an intentional large replacement, set allow_large_replace=true "
+                    "or use write_file for a full rewrite."
+                )
             lines[line - 1:el] = replacement_lines
             preview = f"""--- Было (строки {line}-{el}): ---
 {old_code.rstrip()}
@@ -602,12 +648,13 @@ def edit_code(path: str, line: int, new_code: str = "", mode: str = "replace",
 {new_code.rstrip()}"""
         else:
             return ToolResult(False, None,
-                              f"Неизвестный режим: {mode}. Доступно: replace, insert_before, insert_after, delete")
+                              f"Unknown mode: {mode}. Available: replace, insert_before, insert_after, delete")
 
         # Записываем обратно
         with open(path, "w", encoding=used_encoding) as f:
             f.writelines(lines)
 
+        relocation_note = " (авто-найдено по expected_old_code)" if relocated else ""
         return ToolResult(True, {
             "path": path,
             "mode": mode,
@@ -616,7 +663,7 @@ def edit_code(path: str, line: int, new_code: str = "", mode: str = "replace",
             "total_lines": total_lines,
             "new_total_lines": len(lines),
             "preview": preview,
-            "message": f"Код изменён: {path} (строка {line}, режим: {mode})"
+            "message": f"Код изменён: {path} (строка {line}, режим: {mode}){relocation_note}"
         })
     except Exception as e:
         return ToolResult(False, None, f"Edit error: {str(e)}")
@@ -740,7 +787,7 @@ def grep_code(pattern: str, path: str = ".", ignore_case: bool = True,
                                     '.md', '.txt', '.sh', '.bat', '.ini', '.cfg', '.toml', '.xml')):
                         files_to_search.append(os.path.join(root, fn))
         else:
-            return ToolResult(False, None, f"Путь не найден: {path}")
+            return ToolResult(False, None, f"Path not found: {path}")
 
         results = []
         flags = re_mod.IGNORECASE if ignore_case else 0
@@ -775,7 +822,7 @@ def grep_code(pattern: str, path: str = ".", ignore_case: bool = True,
 
         if not results:
             return ToolResult(False, None,
-                              f"Ничего не найдено по паттерну '{pattern}' в {path}")
+                              f"Nothing found for pattern '{pattern}' in {path}")
 
         # Форматируем вывод
         formatted = []
@@ -794,4 +841,3 @@ def grep_code(pattern: str, path: str = ".", ignore_case: bool = True,
         })
     except Exception as e:
         return ToolResult(False, None, f"Search error: {str(e)}")
-

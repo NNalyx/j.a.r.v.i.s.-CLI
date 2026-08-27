@@ -1,3 +1,9 @@
+import sys
+
+from jarvis_core.types import ToolResult
+
+IS_MACOS = sys.platform == "darwin"
+
 TOOLS_DEFINITION = [
     {
         "type": "function",
@@ -17,7 +23,7 @@ TOOLS_DEFINITION = [
         "type": "function",
         "function": {
             "name": "read_url",
-            "description": "Extract text content from a URL. Use for reading web pages, articles, documentation. Extracts title and main text.",
+            "description": "Read a web page, article, or documentation URL. Uses a JavaScript-capable browser and extracts the densest readable content. If a site requires CAPTCHA or access verification, use SearchWeb or another source instead of retrying.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -31,15 +37,53 @@ TOOLS_DEFINITION = [
         "type": "function",
         "function": {
             "name": "run_cmd",
-            "description": "Execute a Windows shell command with auto-detection between PowerShell and CMD. Use for system commands, file operations, system information, opening apps and URLs.",
+            "description": "Execute a {'macOS zsh/bash shell' if IS_MACOS else 'Windows shell'} command. Use for system commands, file operations, system information, opening apps and URLs.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "command": {"type": "string",
-                                "description": "Command to execute (e.g.: Get-ChildItem, Get-Process, Start-Process chrome, explorer C:\\Users\\Public)"}
+                                "description": "Command to execute (e.g.: {'open https://youtube.com, open -a Safari, pkill -x AppName, ls -la, defaults read ...' if IS_MACOS else 'Get-ChildItem, Get-Process, Start-Process chrome, explorer C:\\\\Users\\\\Public')}"}
                 },
                 "required": ["command"]
             }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_background_task",
+            "description": "Start a long-running command in the background without blocking. Returns task_id, PID, status and log_path. Use for development servers, watchers and other persistent processes. Do not append '&' or use nohup yourself.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "Command to run in the background"},
+                    "cwd": {"type": "string", "description": "Optional absolute working directory"},
+                    "label": {"type": "string", "description": "Short human-readable task name"}
+                },
+                "required": ["command"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "stop_background_task",
+            "description": "Stop a managed background task by task_id or PID. Use the active background task list from context first.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string", "description": "Managed task id such as bg-a1b2c3d4"},
+                    "pid": {"type": "integer", "description": "Process ID returned by run_background_task"}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_background_tasks",
+            "description": "List managed background tasks with task_id, PID, command, status and log path.",
+            "parameters": {"type": "object", "properties": {}}
         }
     },
     {
@@ -59,22 +103,8 @@ TOOLS_DEFINITION = [
     {
         "type": "function",
         "function": {
-            "name": "read_file",
-            "description": "Read file contents. Auto-detects encoding (utf-8, cp1251, cp866). ALWAYS pass the full file path in the path field.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "REQUIRED. Full path to the file, for example C:\\Users\\<username>\\Desktop\\snake_game.py"}
-                },
-                "required": ["path"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "search_text_in_file",
-            "description": "Search for text or similar lines inside a single file. Best for code/text lookup by file path. ALWAYS pass the same full path you used in read_code/read_file. Returns matched lines with line numbers, score, and match type.",
+            "description": "Search for text or similar lines inside a single file. Best for code/text lookup by file path. ALWAYS pass the same full path you used in read_code. Returns matched lines with line numbers, score, and match type.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -127,7 +157,7 @@ TOOLS_DEFINITION = [
         "type": "function",
         "function": {
             "name": "take_screenshot",
-            "description": "Take a screenshot of the screen for visual inspection, reading on-screen information, or fallback verification. Do not use as the first choice for standard desktop app control when UI Automation tools can be used.",
+            "description": "Take a screenshot of the screen for visual inspection, reading on-screen information, or fallback verification.{' Do not use as the first choice for standard desktop app control when UI Automation tools can be used.' if not IS_MACOS else ''}",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -150,7 +180,7 @@ TOOLS_DEFINITION = [
         "type": "function",
         "function": {
             "name": "click_text",
-            "description": "OCR fallback: click on text on screen via EasyOCR + fuzzy matching. Use only when get_app_context/do_action_in_app cannot access the target control or when the task is purely visual.",
+            "description": "OCR fallback: click on text on screen via EasyOCR + fuzzy matching. Use only when {'get_app_context/do_action_in_app cannot access the target control' if not IS_MACOS else 'other methods cannot access the target control'} or when the task is purely visual.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -225,12 +255,12 @@ TOOLS_DEFINITION = [
         "type": "function",
         "function": {
             "name": "launch_app",
-            "description": "Launch an application by name (fuzzy search). Searches Program Files, Start Menu, Desktop, and Windows Registry. Uses fuzzy name matching.",
+            "description": "Launch an application by name (fuzzy search). {'Searches /Applications, ~/Applications, and PATH on macOS.' if IS_MACOS else 'Searches Program Files, Start Menu, Desktop, and Windows Registry. Uses fuzzy name matching.'}",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "app_name": {"type": "string",
-                                 "description": "Application name (e.g., chrome, notepad, word, excel)"}
+                                 "description": "Application name (e.g., {'Safari, Chrome, TextEdit, Terminal' if IS_MACOS else 'chrome, notepad, word, excel')}"}
                 },
                 "required": ["app_name"]
             }
@@ -310,14 +340,14 @@ TOOLS_DEFINITION = [
         "type": "function",
         "function": {
             "name": "read_code",
-            "description": "Smart code reader — reads file by line range or searches for symbols (functions/classes). Saves tokens by not reading the entire file. ALWAYS pass the full path. After read_code, reuse the exact same path in edit_code and check_syntax.",
+            "description": "Smart code reader — reads file by line range or searches for symbols (functions/classes). Returned content includes line numbers (e.g. '42| def foo():') to make edit_code calls easier. ALWAYS pass the full path. After read_code, reuse the exact same path in edit_code and check_syntax.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {"type": "string", "description": "REQUIRED. Full path to the source file. Do not omit this field."},
-                    "start_line": {"type": "integer", "description": "Starting line number (1-indexed)", "default": 1},
+                    "start_line": {"type": "integer", "description": "Starting line number (1-indexed). Strings are accepted and coerced to int.", "default": 1},
                     "end_line": {"type": "integer",
-                                 "description": "Ending line number (inclusive). If omitted, reads up to 200 lines"},
+                                 "description": "Ending line number (inclusive). If omitted, reads up to 200 lines. Strings are accepted and coerced to int."},
                     "symbols": {"type": "array", "items": {"type": "string"},
                                 "description": "List of function/class names to search for. Overrides start_line/end_line"}
                 },
@@ -329,21 +359,22 @@ TOOLS_DEFINITION = [
         "type": "function",
         "function": {
             "name": "edit_code",
-            "description": "Edit source code by line number. Use read_code first. path is ALWAYS required, even if the file was read in the previous step. Copy the exact same full path from read_code into edit_code. For replace/delete, preferably pass expected_old_code so the tool can verify or relocate the target block safely. Modes: 'replace', 'insert_before', 'insert_after', 'delete'.",
+            "description": "Edit source code by line number or by exact current code block. Use read_code first. path is ALWAYS required. For replace/delete, pass expected_old_code to let the tool auto-locate the block (line/end_line become optional). For replace, new_code must contain ONLY the replacement snippet, not the whole file; suspicious large replacements are blocked unless allow_large_replace=true. Use write_file for intentional full rewrites. Modes: 'replace', 'insert_before', 'insert_after', 'delete'.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {"type": "string", "description": "REQUIRED. Full path to the source file. Never omit path."},
-                    "line": {"type": "integer", "description": "Target line number (1-indexed)"},
+                    "line": {"type": "integer", "description": "Target line number (1-indexed). Optional if expected_old_code is provided for replace/delete."},
                     "new_code": {"type": "string",
-                                 "description": "MANDATORY for replace/insert_before/insert_after modes — the actual code content to insert or use as replacement. WITHOUT this, the edit WILL FAIL. For delete mode only, omit this field."},
+                                 "description": "MANDATORY for replace/insert_before/insert_after modes — ONLY the exact snippet to insert or use as replacement. Do not paste the whole file for a small replace. WITHOUT this, the edit WILL FAIL. For delete mode only, omit this field."},
                     "mode": {"type": "string",
                              "description": "Edit mode: replace (requires new_code), insert_before (requires new_code), insert_after (requires new_code), delete (no new_code)",
                              "enum": ["replace", "insert_before", "insert_after", "delete"], "default": "replace"},
                     "end_line": {"type": "integer", "description": "End line for range operations (replace/delete)"},
-                    "expected_old_code": {"type": "string", "description": "Optional but strongly recommended for replace/delete. The exact current code expected at the target lines. Prevents stale line-number edits and accidental duplication."}
+                    "expected_old_code": {"type": "string", "description": "Optional but strongly recommended. The exact current code block to replace/delete. If copied from read_code, line-number prefixes like '42| ' are accepted. If provided, the tool will find it automatically and ignore line/end_line."},
+                    "allow_large_replace": {"type": "boolean", "description": "Safety override for an intentional large replacement. Default false. Prefer write_file for a full rewrite."}
                 },
-                "required": ["path", "line", "mode"]
+                "required": ["path", "mode"]
             }
         }
     },
@@ -496,6 +527,27 @@ TOOLS_DEFINITION = [
     {
         "type": "function",
         "function": {
+            "name": "generate_image",
+            "description": "Generate or transform an image using the local FLUX.2-klein-4B diffusion model on macOS Metal. Use when the user asks to draw, generate, create, or edit/transform an image. To edit an existing image, provide input_image (file path or base64 data URL) and strength. Returns the saved image path and a base64 preview.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "Detailed text description of the image to generate or transform"},
+                    "width": {"type": "integer", "description": "Image width in pixels (multiple of 64, 256-2048)", "default": 512},
+                    "height": {"type": "integer", "description": "Image height in pixels (multiple of 64, 256-2048)", "default": 512},
+                    "steps": {"type": "integer", "description": "Number of diffusion steps. FLUX.2-klein distilled works well with 4.", "default": 4},
+                    "cfg_scale": {"type": "number", "description": "Classifier-free guidance scale. Use 1.0 for distilled models.", "default": 1.0},
+                    "seed": {"type": "integer", "description": "Random seed, -1 for random", "default": -1},
+                    "input_image": {"type": "string", "description": "Existing image file path or base64 data URL for img2img editing. Omit for text-to-image generation.", "default": ""},
+                    "strength": {"type": "number", "description": "How much to change input_image, 0.0 keep original, 1.0 full redraw. Default 0.75.", "default": 0.75}
+                },
+                "required": ["prompt"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "ask_user",
             "description": "Ask the user a clarifying question and wait for an answer. Use when the agent is unsure, needs permission for an irreversible action, or needs sensitive details (e.g. before sending Telegram messages). The UI shows a modal dialog; returns the user's answer.",
             "parameters": {
@@ -509,6 +561,71 @@ TOOLS_DEFINITION = [
         }
     }
 ]
+
+# Planning and context tools (state is managed by the agent; stubs are listed in TOOLS_MAP for consistency)
+PLANNING_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "create_plan",
+            "description": "Create a numbered plan for multi-step tasks. MUST be used first for any task requiring more than 2-3 tool calls or any code/feature work. The plan is automatically injected into every subsequent request.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Short task title"},
+                    "steps": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Ordered list of concrete step descriptions"
+                    }
+                },
+                "required": ["title", "steps"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_plan",
+            "description": "Update the status of a step in the active plan. Call this whenever a step becomes in_progress or done.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "step_id": {"type": "string", "description": "Step number or id from the active plan"},
+                    "status": {
+                        "type": "string",
+                        "enum": ["pending", "in_progress", "done"],
+                        "description": "New status for the step"
+                    }
+                },
+                "required": ["step_id", "status"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_working_directory",
+            "description": "Set the default working directory for run_cmd and run_background_task. Auto-detected from file paths, but can be set explicitly when the user names a project folder.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Absolute path to the project directory"}
+                },
+                "required": ["path"]
+            }
+        }
+    },
+]
+
+TOOLS_DEFINITION = PLANNING_TOOLS + TOOLS_DEFINITION
+
+if IS_MACOS:
+    _MACOS_EXCLUDED_TOOLS = {"get_app_context", "do_action_in_app"}
+    TOOLS_DEFINITION = [
+        tool for tool in TOOLS_DEFINITION
+        if tool.get("function", {}).get("name") not in _MACOS_EXCLUDED_TOOLS
+    ]
 
 MULTIMODAL_TOOL_NAMES = {"take_screenshot"}
 
@@ -528,13 +645,14 @@ from .files import (
     list_directory,
     list_file,
     read_code,
-    read_file,
     search_text_in_file,
     write_file,
 )
+from .image_generation import generate_image
 from .memory_tool import manage_memory
 from .ocr import click_text
 from .shell import run_cmd, run_python
+from .background import list_background_tasks, run_background_task, stop_background_task
 from .uia import do_action_in_app, get_app_context
 from .telegram_account import (
     telegram_account_info,
@@ -550,12 +668,22 @@ from .user_prompt import ask_user
 from .wait import wait
 from .web import read_url, search_web
 
+def _planning_tool_stub(**kwargs) -> ToolResult:
+    return ToolResult(False, None, "This tool is handled by the agent directly.")
+
+
 TOOLS_MAP = {
+    "create_plan": _planning_tool_stub,
+    "update_plan": _planning_tool_stub,
+    "set_working_directory": _planning_tool_stub,
+    "generate_image": generate_image,
     "search_web": search_web,
     "read_url": read_url,
     "run_cmd": run_cmd,
+    "run_background_task": run_background_task,
+    "stop_background_task": stop_background_task,
+    "list_background_tasks": list_background_tasks,
     "run_python": run_python,
-    "read_file": read_file,
     "search_text_in_file": search_text_in_file,
     "write_file": write_file,
     "list_directory": list_directory,
@@ -586,3 +714,6 @@ TOOLS_MAP = {
     "ask_user": ask_user,
 }
 
+if IS_MACOS:
+    for _tool_name in _MACOS_EXCLUDED_TOOLS:
+        TOOLS_MAP.pop(_tool_name, None)

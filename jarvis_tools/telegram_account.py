@@ -170,9 +170,9 @@ class TelegramAccountManager:
     # ------------------------------------------------------------------
     def setup_start(self, api_id: int, api_hash: str, phone: str) -> Dict[str, Any]:
         if not TELETHON_AVAILABLE:
-            raise RuntimeError("Telethon не установлен. Установите: pip install telethon")
+            raise RuntimeError("Telethon is not installed. Install it with: pip install telethon")
         if not api_id or not api_hash or not phone:
-            raise ValueError("api_id, api_hash и phone обязательны")
+            raise ValueError("api_id, api_hash and phone are required")
 
         with self._lock:
             self._disconnect_unsafe()
@@ -199,15 +199,15 @@ class TelegramAccountManager:
                 return {"needs_code": True}
             except FloodWaitError as exc:
                 self._disconnect_unsafe()
-                raise RuntimeError(f"Слишком много попыток. Подождите {exc.seconds} сек.")
+                raise RuntimeError(f"Too many attempts. Please wait {exc.seconds} sec.")
             except Exception as exc:
                 self._disconnect_unsafe()
-                raise RuntimeError(f"Не удалось отправить код: {exc}")
+                raise RuntimeError(f"Failed to send code: {exc}")
 
     def setup_confirm_code(self, code: str) -> Dict[str, Any]:
         with self._lock:
             if not self._setup_state.get("needs_code"):
-                raise RuntimeError("Сначала начните настройку и введите phone")
+                raise RuntimeError("Start setup and enter phone first")
             phone = self._setup_state["phone"]
             phone_code_hash = self._setup_state.get("phone_code_hash")
             try:
@@ -220,25 +220,25 @@ class TelegramAccountManager:
                 self._setup_state["needs_2fa"] = True
                 return {"needs_2fa": True}
             except PhoneCodeInvalidError:
-                raise RuntimeError("Неверный код подтверждения. Попробуйте ещё раз.")
+                raise RuntimeError("Invalid confirmation code. Please try again.")
             except Exception as exc:
-                raise RuntimeError(f"Не удалось подтвердить код: {exc}")
+                raise RuntimeError(f"Failed to confirm code: {exc}")
 
     def setup_confirm_2fa(self, password: str) -> Dict[str, Any]:
         with self._lock:
             if not self._setup_state.get("needs_2fa"):
-                raise RuntimeError("2FA не требуется")
+                raise RuntimeError("2FA is not required")
             try:
                 self._client.sign_in(password=password)
                 self._setup_state["needs_2fa"] = False
                 return {"ok": True}
             except Exception as exc:
-                raise RuntimeError(f"Не удалось подтвердить 2FA: {exc}")
+                raise RuntimeError(f"Failed to confirm 2FA: {exc}")
 
     def setup_save_session(self) -> Dict[str, Any]:
         with self._lock:
             if not self._client:
-                raise RuntimeError("Клиент не инициализирован")
+                raise RuntimeError("Client is not initialized")
             try:
                 me = self._client.get_me()
                 session_string = self._client.session.save()
@@ -260,7 +260,7 @@ class TelegramAccountManager:
                     "user_id": data["user_id"],
                 }
             except Exception as exc:
-                raise RuntimeError(f"Не удалось сохранить сессию: {exc}")
+                raise RuntimeError(f"Failed to save session: {exc}")
 
     # ------------------------------------------------------------------
     # Entity resolution
@@ -268,7 +268,7 @@ class TelegramAccountManager:
     async def _resolve_entity(self, entity: str):
         """Resolve a string entity (username, id, link) to a Telegram entity."""
         if not self._client:
-            raise RuntimeError("Клиент не подключён")
+            raise RuntimeError("Client is not connected")
 
         # Strip known prefixes and extract username or invite hash.
         text = entity.strip()
@@ -294,7 +294,7 @@ class TelegramAccountManager:
     # ------------------------------------------------------------------
     async def get_me(self) -> Dict[str, Any]:
         if not self.ensure_connected():
-            raise RuntimeError("Аккаунт не подключён")
+            raise RuntimeError("Account not connected")
         me = await self._client.get_me()
         return {
             "id": me.id,
@@ -307,7 +307,7 @@ class TelegramAccountManager:
 
     async def get_dialogs(self, limit: int = 50) -> List[Dict[str, Any]]:
         if not self.ensure_connected():
-            raise RuntimeError("Аккаунт не подключён")
+            raise RuntimeError("Account not connected")
         dialogs = []
         async for dialog in self._client.iter_dialogs(limit=limit):
             entity = dialog.entity
@@ -327,7 +327,7 @@ class TelegramAccountManager:
 
     async def get_unread_messages(self, limit: int = 50) -> List[Dict[str, Any]]:
         if not self.ensure_connected():
-            raise RuntimeError("Аккаунт не подключён")
+            raise RuntimeError("Account not connected")
         messages = []
         async for dialog in self._client.iter_dialogs():
             if dialog.unread_count == 0:
@@ -354,7 +354,7 @@ class TelegramAccountManager:
 
     async def send_message(self, entity: str, text: str) -> Dict[str, Any]:
         if not self.ensure_connected():
-            raise RuntimeError("Аккаунт не подключён")
+            raise RuntimeError("Account not connected")
         target = await self._resolve_entity(entity)
         message = await self._client.send_message(target, text)
         return {
@@ -366,7 +366,7 @@ class TelegramAccountManager:
 
     async def join_chat(self, link_or_username: str) -> Dict[str, Any]:
         if not self.ensure_connected():
-            raise RuntimeError("Аккаунт не подключён")
+            raise RuntimeError("Account not connected")
         text = link_or_username.strip()
         # Private invite link (t.me/+HASH or t.me/joinchat/HASH)
         if "t.me/+" in text or "t.me/joinchat/" in text or text.startswith("+") or text.startswith("joinchat/"):
@@ -381,12 +381,12 @@ class TelegramAccountManager:
 
     async def request_join(self, invite_link: str) -> Dict[str, Any]:
         if not self.ensure_connected():
-            raise RuntimeError("Аккаунт не подключён")
+            raise RuntimeError("Account not connected")
         # Extract invite hash from various link formats.
         link = invite_link.strip()
         match = re.search(r"(?:t\.me/\+?|telegram\.me/\+?|joinchat/)([A-Za-z0-9_-]+)", link)
         if not match:
-            raise ValueError("Некорректная пригласительная ссылка")
+            raise ValueError("Invalid invite link")
         hash_value = match.group(1)
         result = await self._client(functions.messages.ImportChatInviteRequest(hash=hash_value))
         chat = result.chats[0] if result.chats else None
@@ -398,7 +398,7 @@ class TelegramAccountManager:
 
     async def search_global(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
         if not self.ensure_connected():
-            raise RuntimeError("Аккаунт не подключён")
+            raise RuntimeError("Account not connected")
         results = []
         async for result in self._client.iter_messages(None, limit=limit, search=query):
             chat = await result.get_chat()
@@ -417,7 +417,7 @@ class TelegramAccountManager:
 
     async def get_chat_messages(self, entity: str, limit: int = 50) -> List[Dict[str, Any]]:
         if not self.ensure_connected():
-            raise RuntimeError("Аккаунт не подключён")
+            raise RuntimeError("Account not connected")
         target = await self._resolve_entity(entity)
         messages = []
         async for message in self._client.iter_messages(target, limit=limit):
@@ -449,7 +449,7 @@ def _not_configured_result() -> ToolResult:
     return ToolResult(
         False,
         None,
-        "Telegram-аккаунт не настроен. Откройте Настройки → Telegram-аккаунт и пройдите авторизацию.",
+        "Telegram account is not configured. Open Settings → Telegram account and complete authorization.",
     )
 
 
@@ -484,7 +484,7 @@ def telegram_account_info() -> ToolResult:
             },
         )
     except Exception as exc:
-        return ToolResult(False, None, f"Ошибка получения информации об аккаунте: {exc}")
+        return ToolResult(False, None, f"Error getting account info: {exc}")
 
 
 def telegram_get_chats(limit: int = 50) -> ToolResult:
@@ -495,7 +495,7 @@ def telegram_get_chats(limit: int = 50) -> ToolResult:
         dialogs = _run_async(manager.get_dialogs(limit=limit))
         return ToolResult(True, {"chats": dialogs})
     except Exception as exc:
-        return ToolResult(False, None, f"Ошибка получения чатов: {exc}")
+        return ToolResult(False, None, f"Error getting chats: {exc}")
 
 
 def telegram_get_unread(limit: int = 50) -> ToolResult:
@@ -506,7 +506,7 @@ def telegram_get_unread(limit: int = 50) -> ToolResult:
         messages = _run_async(manager.get_unread_messages(limit=limit))
         return ToolResult(True, {"messages": messages})
     except Exception as exc:
-        return ToolResult(False, None, f"Ошибка получения непрочитанных: {exc}")
+        return ToolResult(False, None, f"Error getting unread messages: {exc}")
 
 
 def telegram_send_message(entity: str, text: str) -> ToolResult:
@@ -517,7 +517,7 @@ def telegram_send_message(entity: str, text: str) -> ToolResult:
         result = _run_async(manager.send_message(entity, text))
         return ToolResult(True, result)
     except Exception as exc:
-        return ToolResult(False, None, f"Ошибка отправки сообщения: {exc}")
+        return ToolResult(False, None, f"Error sending message: {exc}")
 
 
 def telegram_join_chat(link_or_username: str) -> ToolResult:
@@ -528,7 +528,7 @@ def telegram_join_chat(link_or_username: str) -> ToolResult:
         result = _run_async(manager.join_chat(link_or_username))
         return ToolResult(True, result)
     except Exception as exc:
-        return ToolResult(False, None, f"Ошибка присоединения к чату: {exc}")
+        return ToolResult(False, None, f"Error joining chat: {exc}")
 
 
 def telegram_request_join(invite_link: str) -> ToolResult:
@@ -539,7 +539,7 @@ def telegram_request_join(invite_link: str) -> ToolResult:
         result = _run_async(manager.request_join(invite_link))
         return ToolResult(True, result)
     except Exception as exc:
-        return ToolResult(False, None, f"Ошибка запроса на вступление: {exc}")
+        return ToolResult(False, None, f"Error requesting join: {exc}")
 
 
 def telegram_global_search(query: str, limit: int = 20) -> ToolResult:
@@ -550,7 +550,7 @@ def telegram_global_search(query: str, limit: int = 20) -> ToolResult:
         results = _run_async(manager.search_global(query, limit=limit))
         return ToolResult(True, {"results": results})
     except Exception as exc:
-        return ToolResult(False, None, f"Ошибка глобального поиска: {exc}")
+        return ToolResult(False, None, f"Error in global search: {exc}")
 
 
 def telegram_get_messages(entity: str, limit: int = 50) -> ToolResult:
@@ -561,4 +561,4 @@ def telegram_get_messages(entity: str, limit: int = 50) -> ToolResult:
         messages = _run_async(manager.get_chat_messages(entity, limit=limit))
         return ToolResult(True, {"messages": messages})
     except Exception as exc:
-        return ToolResult(False, None, f"Ошибка получения сообщений чата: {exc}")
+        return ToolResult(False, None, f"Error getting chat messages: {exc}")

@@ -3,12 +3,14 @@ import json
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from jarvis_core.colors import Colors
 from jarvis_core.types import ToolResult
+from jarvis_ui.animation import AnimationManager
 
 
 class UI:
@@ -22,6 +24,24 @@ class UI:
     ERROR_COLOR = Colors.BRIGHT_RED
     TOOL_COLOR = Colors.BRIGHT_YELLOW
     SYSTEM_COLOR = Colors.DIM
+
+    @staticmethod
+    def _strip_tool_call_markup(text: str) -> str:
+        """Удалить XML-разметку вызовов инструментов из текста (safety-net для UI)."""
+        if not text:
+            return text
+        cleaned = text
+        cleaned = re.sub(r'<tool_call\b[^>]*>.*?</tool_call\s*>', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+        cleaned = re.sub(r'<function=[^>]+>.*?</function\s*>', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+        cleaned = re.sub(r'<parameter=[^>]+>.*?</parameter\s*>', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+        cleaned = re.sub(r'<tool_call\b[^>]*>', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'</tool_call\s*>', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'<function=[^>]+>', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'</function\s*>', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'<parameter=[^>]+>', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'</parameter\s*>', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'<(?:tool_call|function|parameter)\b[^>]*$', '', cleaned, flags=re.IGNORECASE)
+        return cleaned
 
     @staticmethod
     def clear():
@@ -87,7 +107,8 @@ class UI:
             print(f"{Colors.DIM}{'·' * UI.WIDTH}{Colors.RESET}")
 
     @staticmethod
-    def print_tool_call(tool_name: str, args: Dict, iteration: int) -> threading.Event:
+    def print_tool_call(tool_name: str, args: Dict, iteration: int,
+                        tool_call_id: Optional[str] = None) -> threading.Event:
         """
         Вывод вызова инструмента.
 
@@ -113,6 +134,31 @@ class UI:
 
         # Возвращаем dummy event для обратной совместимости
         return threading.Event()
+
+    @staticmethod
+    def start_streaming_tool_call(tool_call_id: str, tool_name_hint: str = "") -> None:
+        """Начало потокового вывода вызова инструмента (native tool_calls)."""
+        pass
+
+    @staticmethod
+    def update_streaming_tool_call(tool_call_id: str, tool_name: str, arguments_json: str) -> None:
+        """Обновление потокового вывова вызова инструмента очередным чанком."""
+        pass
+
+    @staticmethod
+    def finish_streaming_tool_call(tool_call_id: str, tool_name: str, arguments_json: str) -> None:
+        """Завершение потокового вывода вызова инструмента."""
+        pass
+
+    @staticmethod
+    def cancel_streaming_tool_call(tool_call_id: str, tool_name: str = "", reason: str = "") -> None:
+        """Отмена частично выведенного потокового вызова инструмента (например, при ошибке сервера)."""
+        pass
+
+    @staticmethod
+    def print_plan_update(plan: Optional[Dict[str, Any]]) -> None:
+        """Обновление активного плана (хук для web/desktop UI)."""
+        pass
 
     @staticmethod
     def print_tool_result(tool_name: str, result: ToolResult, iteration: int, stop_event: threading.Event = None):
@@ -533,6 +579,11 @@ class UI:
             return
 
         chunk = chunk.replace('\r', '')
+        # Safety-net: если XML-разметка инструментов пробилась через агентский
+        # фильтр, не даём ей отобразиться и попасть в full_text.
+        chunk = UI._strip_tool_call_markup(chunk)
+        if not chunk:
+            return
         state["full_text"] += chunk
         state["buffer"] += chunk
         printed_any = False
@@ -727,6 +778,24 @@ class UI:
         filled = int((iteration / max_iterations) * bar_len)
         bar = "█" * filled + "░" * (bar_len - filled)
         print(f"\n{Colors.BRIGHT_MAGENTA}⟳ Агент: [{bar}] {iteration}/{max_iterations}{Colors.RESET}")
+
+    @staticmethod
+    def print_prompt_progress(percent: int):
+        """Прогресс обработки prompt контекста моделью (одна перезаписываемая строка)."""
+        bar_len = 20
+        filled = int((max(0, min(100, percent)) / 100) * bar_len)
+        bar = "█" * filled + "░" * (bar_len - filled)
+        sys.stdout.write(f"\r{Colors.BRIGHT_CYAN}⟳ Обработка контекста: [{bar}] {percent}%{Colors.RESET}")
+        sys.stdout.flush()
+
+    @staticmethod
+    def print_decode_progress(percent: int):
+        """Прогресс генерации (decode) моделью (одна перезаписываемая строка)."""
+        bar_len = 20
+        filled = int((max(0, min(100, percent)) / 100) * bar_len)
+        bar = "█" * filled + "░" * (bar_len - filled)
+        sys.stdout.write(f"\r{Colors.BRIGHT_GREEN}⟳ Генерация ответа: [{bar}] {percent}%{Colors.RESET}")
+        sys.stdout.flush()
 
     @staticmethod
     def print_input_prompt() -> str:
@@ -1297,7 +1366,7 @@ class UI:
   🌐 {Colors.BRIGHT_YELLOW}read_url{Colors.RESET}     — Прочитать веб-страницу по URL
   💻 {Colors.BRIGHT_YELLOW}run_cmd{Colors.RESET}      — Выполнить команду CMD
   🐍 {Colors.BRIGHT_YELLOW}run_python{Colors.RESET}   — Выполнить Python код
-  📖 {Colors.BRIGHT_YELLOW}read_file{Colors.RESET}    — Читать файл
+  📖 {Colors.BRIGHT_YELLOW}read_code{Colors.RESET}    — Читать код/файл построчно
   ✏️ {Colors.BRIGHT_YELLOW}write_file{Colors.RESET}   — Записать файл
   📁 {Colors.BRIGHT_YELLOW}list_directory{Colors.RESET} — Список файлов
 
@@ -1346,8 +1415,8 @@ class UI:
    Execute Python code
    Example: print(2+2), import os; print(os.getcwd())
 
-{Colors.BRIGHT_YELLOW}5. read_file(path){Colors.RESET}
-   Read a file (auto-detects encoding)
+{Colors.BRIGHT_YELLOW}5. read_code(path, start_line, end_line){Colors.RESET}
+   Read source code with line numbers
 
 {Colors.BRIGHT_YELLOW}6. write_file(path, content){Colors.RESET}
    Write content to a file

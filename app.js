@@ -22,14 +22,42 @@ const presetSetupBackBtn = document.getElementById("preset-setup-back-btn");
 const presetSetupError = document.getElementById("preset-setup-error");
 const presetSetupHint = document.getElementById("preset-setup-hint");
 const presetNameInput = document.getElementById("preset-name-input");
+const presetBackendWrap = document.getElementById("preset-backend-wrap");
+const presetBackendSelect = document.getElementById("preset-backend-select");
+const presetLlamaFields = document.getElementById("preset-llama-fields");
 const presetLlamaInput = document.getElementById("preset-llama-input");
+const presetLlamaHint = document.getElementById("preset-llama-hint");
 const presetModelInput = document.getElementById("preset-model-input");
+const presetScanModelsBtn = document.getElementById("preset-scan-models-btn");
+const presetLocalModelsSelect = document.getElementById("preset-local-models-select");
+const presetHfRepoInput = document.getElementById("preset-hf-repo-input");
+const presetHfTokenInput = document.getElementById("preset-hf-token-input");
+const presetDownloadBtn = document.getElementById("preset-download-btn");
+const downloadProgressWrap = document.getElementById("download-progress-wrap");
+const downloadProgressBar = document.getElementById("download-progress-bar");
+const downloadProgressText = document.getElementById("download-progress-text");
+const downloadProgressMeta = document.getElementById("download-progress-meta");
+const downloadProgressHint = document.getElementById("download-progress-hint");
+const presetMlxFields = document.getElementById("preset-mlx-fields");
+const presetMtplxFields = document.getElementById("preset-mtplx-fields");
+const presetLlamaExtraFields = document.getElementById("preset-llama-extra-fields");
+const presetTemperatureInput = document.getElementById("preset-temperature-input");
+const presetMaxTokensInput = document.getElementById("preset-max-tokens-input");
+const presetMtplxTemperatureInput = document.getElementById("preset-mtplx-temperature-input");
+const presetMtplxMaxTokensInput = document.getElementById("preset-mtplx-max-tokens-input");
+const presetMtplxPortInput = document.getElementById("preset-mtplx-port-input");
+const presetMtplxContextInput = document.getElementById("preset-mtplx-context-input");
+const presetMtplxDepthInput = document.getElementById("preset-mtplx-depth-input");
+const presetMtplxMtpEnabledInput = document.getElementById("preset-mtplx-mtp-enabled-input");
+const presetPortInputLlama = document.getElementById("preset-port-input-llama");
 const presetMmprojInput = document.getElementById("preset-mmproj-input");
 const presetMtpInput = document.getElementById("preset-mtp-input");
+const presetMtpEnabledInput = document.getElementById("preset-mtp-enabled-input");
 const presetContextInput = document.getElementById("preset-context-input");
 const presetNglInput = document.getElementById("preset-ngl-input");
 const presetPortInput = document.getElementById("preset-port-input");
 const presetSaveBtn = document.getElementById("preset-save-btn");
+const presetSetupLead = document.getElementById("preset-setup-lead");
 const presetCardList = document.getElementById("preset-card-list");
 const presetAddBtn = document.getElementById("preset-add-btn");
 const toolsList = document.getElementById("tools-list");
@@ -54,6 +82,10 @@ const chatForm = document.getElementById("chat-form");
 const messageInput = document.getElementById("message-input");
 const pastePreview = document.getElementById("paste-preview");
 const sendBtn = document.getElementById("send-btn");
+const voiceMessageBtn = document.getElementById("voice-message-btn");
+const voskDownloadBanner = document.getElementById("vosk-download-banner");
+const voskDownloadBtn = document.getElementById("vosk-download-btn");
+const voskDownloadStatus = document.getElementById("vosk-download-status");
 const contextIndicator = document.getElementById("context-indicator");
 const contextIndicatorText = document.getElementById("context-indicator-text");
 const chatLog = document.getElementById("chat-log");
@@ -61,6 +93,9 @@ const template = document.getElementById("message-template");
 const liveStatus = document.getElementById("live-status");
 const liveStatusText = document.getElementById("live-status-text");
 const liveStatusTimer = document.getElementById("live-status-timer");
+const liveStatusProgress = document.getElementById("live-status-progress");
+const liveStatusProgressBar = document.getElementById("live-status-progress-bar");
+const liveStatusProgressText = document.getElementById("live-status-progress-text");
 const voiceOverlay = document.getElementById("voice-overlay");
 const voiceOverlayStatus = document.getElementById("voice-overlay-status");
 const voiceOverlayTranscript = document.getElementById("voice-overlay-transcript");
@@ -105,6 +140,30 @@ const telegramSetupStep2fa = document.getElementById("telegram-setup-step-2fa");
 const telegramSetupStepSuccess = document.getElementById("telegram-setup-step-success");
 const telegramSetupSuccessText = document.getElementById("telegram-setup-success-text");
 
+// Update modal
+const updateModal = document.getElementById("update-modal");
+const updateCurrentVersion = document.getElementById("update-current-version");
+const updateLatestVersion = document.getElementById("update-latest-version");
+const updateError = document.getElementById("update-error");
+const updateLaterBtn = document.getElementById("update-later-btn");
+const updateNowBtn = document.getElementById("update-now-btn");
+
+// System check banner
+const systemCheckBanner = document.getElementById("system-check-banner");
+const systemCheckIcon = document.getElementById("system-check-icon");
+const systemCheckTitle = document.getElementById("system-check-title");
+const systemCheckMessage = document.getElementById("system-check-message");
+const systemCheckList = document.getElementById("system-check-list");
+const systemCheckClose = document.getElementById("system-check-close");
+const backgroundTaskList = document.getElementById("background-task-list");
+const backgroundTaskCount = document.getElementById("background-task-count");
+const activePlanPanel = document.getElementById("active-plan-panel");
+const activePlanToggle = document.getElementById("active-plan-toggle");
+const activePlanTitle = document.getElementById("active-plan-title");
+const activePlanList = document.getElementById("active-plan-list");
+const activePlanStepCount = document.getElementById("active-plan-step-count");
+const activePlanProgressFill = document.getElementById("active-plan-progress-fill");
+
 const TOOL_COLLAPSE_LIMIT = 480;
 let modelsCache = [];
 let configCache = null;
@@ -113,6 +172,7 @@ let asrBackendsCache = [];
 let presetSaveInFlight = false;
 let chatsCache = [];
 let ttsRequestInFlight = false;
+let activePlanCollapsed = false;
 let voiceRequestInFlight = false;
 let asrRequestInFlight = false;
 let pendingImages = [];
@@ -126,14 +186,90 @@ let voiceSubmitRequested = false;
 let liveStatusTimerId = null;
 let liveStatusTimerStartedAt = 0;
 let liveStatusTimerBaseText = "";
+let contextRefreshTimerId = null;
+let contextRefreshInFlight = false;
 let isGeneratingResponse = false;
 let stopRequestInFlight = false;
+let isRecordingVoiceMessage = false;
+let isMacOs = false;
+let downloadEventSource = null;
+let localModelsCache = [];
 let currentChatId = null;
 let chatSaveTimerId = null;
 let chatSaveInFlight = false;
 let openChatMenuId = null;
 const pendingAutoTitleChatIds = new Set();
 const recentAutoTitleUpdates = new Map();
+const activeImageGenPlaceholders = new Map();
+const activeStreamingToolCalls = new Map();
+
+// ─── Smart auto-scroll / follow-mode ────────────────────────────────
+let streamFollowMode = true;
+let streamFollowButton = null;
+let streamFollowIgnoreScroll = false;
+const STREAM_FOLLOW_THRESHOLD = 80;
+
+function isChatLogNearBottom() {
+  if (!chatLog) return true;
+  const distance = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight;
+  return distance <= STREAM_FOLLOW_THRESHOLD;
+}
+
+function scrollToBottomIfFollowing() {
+  if (!chatLog) return;
+  if (streamFollowMode) {
+    streamFollowIgnoreScroll = true;
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }
+}
+
+function updateStreamFollowButton() {
+  if (!streamFollowButton) return;
+  const nearBottom = isChatLogNearBottom();
+  if (nearBottom && streamFollowMode) {
+    streamFollowButton.classList.add("hidden");
+  } else {
+    streamFollowButton.classList.remove("hidden");
+  }
+}
+
+function createStreamFollowButton() {
+  if (streamFollowButton || !document.querySelector(".chat-frame")) return;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "stream-follow-btn hidden";
+  btn.setAttribute("aria-label", "Следить за генерацией");
+  btn.innerHTML = `
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+    <span>Следить</span>
+  `;
+  btn.addEventListener("click", () => {
+    streamFollowMode = true;
+    scrollToBottomIfFollowing();
+    updateStreamFollowButton();
+  });
+  document.querySelector(".chat-frame").appendChild(btn);
+  streamFollowButton = btn;
+}
+
+function initStreamFollow() {
+  createStreamFollowButton();
+  if (!chatLog) return;
+  chatLog.addEventListener("scroll", () => {
+    if (streamFollowIgnoreScroll) {
+      streamFollowIgnoreScroll = false;
+      updateStreamFollowButton();
+      return;
+    }
+    const nearBottom = isChatLogNearBottom();
+    if (nearBottom) {
+      streamFollowMode = true;
+    } else {
+      streamFollowMode = false;
+    }
+    updateStreamFollowButton();
+  }, { passive: true });
+}
 
 function isChatBusy() {
   return isGeneratingResponse;
@@ -157,12 +293,128 @@ function setSendButtonMode(mode) {
     : `<span class="send-btn-arrow" aria-hidden="true">➜</span>`;
 }
 
-function setGeneratingState(nextState) {
+function setGeneratingState(nextState, estimatedTokens = 0) {
   isGeneratingResponse = Boolean(nextState);
   if (!isGeneratingResponse) {
+    liveStatus?.classList.remove("is-compacting");
+    liveStatusProgress?.classList.remove("is-indeterminate");
     stopRequestInFlight = false;
+    stopGenerationProgress();
+    stopContextRefreshTimer();
+  } else {
+    startGenerationProgress(estimatedTokens);
+    startContextRefreshTimer();
   }
   setSendButtonMode(isGeneratingResponse ? "stop" : "send");
+}
+
+function startContextRefreshTimer() {
+  stopContextRefreshTimer();
+  contextRefreshTimerId = setInterval(() => {
+    if (contextRefreshInFlight) return;
+    contextRefreshInFlight = true;
+    refreshContext().finally(() => {
+      contextRefreshInFlight = false;
+    });
+  }, 5000);
+}
+
+function stopContextRefreshTimer() {
+  if (contextRefreshTimerId) {
+    clearInterval(contextRefreshTimerId);
+    contextRefreshTimerId = null;
+  }
+}
+
+let generationProgressInterval = null;
+let generationProgressPercent = 0;
+let generationProgressPhase = "thinking"; // thinking | generating
+let hasRealPromptProgress = false;
+let lastRealPromptProgressAt = 0;
+let hasRealDecodeProgress = false;
+let estimatedPromptTokens = 0;
+let promptProgressStartTime = 0;
+let estimatedPrefillSpeed = parseFloat(localStorage.getItem("jarvis_estimated_prefill_speed")) || 150; // tokens/sec
+
+function startGenerationProgress(estimatedTokens = 0) {
+  generationProgressPercent = 0;
+  generationProgressPhase = "thinking";
+  hasRealPromptProgress = false;
+  hasRealDecodeProgress = false;
+  lastRealPromptProgressAt = 0;
+  estimatedPromptTokens = Math.max(0, estimatedTokens);
+  promptProgressStartTime = Date.now();
+  if (liveStatusProgress) {
+    liveStatusProgress.classList.remove("hidden");
+  }
+  updateGenerationProgressUI();
+  if (generationProgressInterval) {
+    clearInterval(generationProgressInterval);
+  }
+  generationProgressInterval = setInterval(() => {
+    if (generationProgressPhase === "thinking") {
+      // Prefer real prefill progress from llama-server when available.
+      if (!hasRealPromptProgress && estimatedPromptTokens > 0) {
+        const elapsedSec = (Date.now() - promptProgressStartTime) / 1000;
+        const expectedSec = estimatedPromptTokens / Math.max(1, estimatedPrefillSpeed);
+        generationProgressPercent = Math.min(99, (elapsedSec / expectedSec) * 100);
+      }
+    } else if (generationProgressPhase === "generating") {
+      // If real decode progress arrives, don't fake-advance the bar.
+      if (hasRealDecodeProgress) {
+        return;
+      }
+      generationProgressPercent = Math.min(92, generationProgressPercent + 0.3);
+    }
+    updateGenerationProgressUI();
+  }, 100);
+}
+
+function markGenerationProgressGenerating() {
+  if (generationProgressPhase !== "generating") {
+    generationProgressPhase = "generating";
+    // Не сбрасываем прогресс назад; если prefill дошёл до 100%, генерация стартует с 100% и пойдёт дальше.
+    generationProgressPercent = Math.max(generationProgressPercent, 0);
+  }
+}
+
+function bumpGenerationProgress(delta = 2) {
+  if (generationProgressPhase === "generating") {
+    generationProgressPercent = Math.min(95, generationProgressPercent + delta);
+    updateGenerationProgressUI();
+  }
+}
+
+function finishGenerationProgress() {
+  generationProgressPercent = 100;
+  generationProgressPhase = "done";
+  updateGenerationProgressUI();
+  setTimeout(stopGenerationProgress, 600);
+}
+
+function stopGenerationProgress() {
+  if (generationProgressInterval) {
+    clearInterval(generationProgressInterval);
+    generationProgressInterval = null;
+  }
+  generationProgressPercent = 0;
+  generationProgressPhase = "thinking";
+  hasRealPromptProgress = false;
+  hasRealDecodeProgress = false;
+  lastRealPromptProgressAt = 0;
+  if (liveStatusProgress) {
+    liveStatusProgress.classList.add("hidden");
+  }
+  updateGenerationProgressUI();
+}
+
+function updateGenerationProgressUI() {
+  if (!liveStatusProgressBar || !liveStatusProgressText) {
+    return;
+  }
+  const pct = Math.round(Math.max(0, Math.min(100, generationProgressPercent)));
+  liveStatusProgressBar.style.width = `${pct}%`;
+  liveStatusProgressText.textContent = `${pct}%`;
 }
 
 async function requestStopGeneration() {
@@ -350,6 +602,220 @@ async function refreshTelegramAccountStatus() {
   }
 }
 
+// === System check banner ===
+async function runSystemCheck() {
+  try {
+    const response = await fetch("/api/system-check");
+    if (!response.ok) return;
+    const data = await response.json();
+    const dismissed = getDismissedSystemCheckIssues();
+    renderSystemCheckBanner((data.issues || []).filter((issue) => !dismissed.has(issue.id)));
+  } catch (error) {
+    // Тихо игнорируем: баннер — необязательная подсказка
+  }
+}
+
+function getDismissedSystemCheckIssues() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem("jarvis.dismissedSystemChecks") || "[]"));
+  } catch {
+    return new Set();
+  }
+}
+
+function renderSystemCheckBanner(issues) {
+  if (!systemCheckBanner || !systemCheckTitle || !systemCheckMessage || !systemCheckList) return;
+
+  if (!issues.length) {
+    systemCheckBanner.classList.add("hidden");
+    return;
+  }
+
+  const hasError = issues.some((i) => i.severity === "error");
+  systemCheckBanner.classList.remove("hidden", "warning", "error");
+  systemCheckBanner.classList.add(hasError ? "error" : "warning");
+  systemCheckIcon.textContent = hasError ? "🚫" : "⚠️";
+
+  if (issues.length === 1) {
+    systemCheckTitle.textContent = issues[0].title;
+    systemCheckMessage.textContent = issues[0].message;
+  } else {
+    systemCheckTitle.textContent = hasError ? "Обнаружены критические проблемы" : "Нужно настроить несколько разрешений";
+    systemCheckMessage.textContent = `Найдено проблем: ${issues.length}. Разверните карточки ниже, чтобы увидеть пошаговое решение.`;
+  }
+
+  systemCheckList.innerHTML = "";
+  issues.forEach((issue) => {
+    const issueEl = document.createElement("div");
+    issueEl.className = `system-check-issue ${issue.severity === "error" ? "error" : "warning"}`;
+    issueEl.dataset.issueId = issue.id || issue.title;
+
+    const header = document.createElement("div");
+    header.className = "system-check-issue-header";
+
+    const title = document.createElement("div");
+    title.className = "system-check-issue-title";
+    title.textContent = issue.title;
+
+    const badge = document.createElement("span");
+    badge.className = `system-check-issue-badge ${issue.severity === "error" ? "error" : "warning"}`;
+    badge.textContent = issue.severity === "error" ? "Критично" : "Важно";
+
+    header.appendChild(title);
+    header.appendChild(badge);
+    issueEl.appendChild(header);
+
+    const message = document.createElement("div");
+    message.className = "system-check-issue-message";
+    message.textContent = issue.message;
+    issueEl.appendChild(message);
+
+    const actions = document.createElement("div");
+    actions.className = "system-check-issue-actions";
+
+    const solutionBtn = document.createElement("button");
+    solutionBtn.type = "button";
+    solutionBtn.textContent = "Как исправить";
+    actions.appendChild(solutionBtn);
+
+    if (issue.fix_action) {
+      const fixBtn = document.createElement("button");
+      fixBtn.type = "button";
+      fixBtn.className = "primary";
+      fixBtn.textContent = issue.fix_action === "open_presets" ? "Настроить пресет" : "Исправить";
+      fixBtn.addEventListener("click", () => handleSystemCheckFix(issue));
+      actions.appendChild(fixBtn);
+    }
+
+    issueEl.appendChild(actions);
+
+    const solutionEl = document.createElement("div");
+    solutionEl.className = "system-check-solution hidden";
+
+    const solutionTitle = document.createElement("div");
+    solutionTitle.className = "system-check-solution-title";
+    solutionTitle.textContent = "Пошаговое решение";
+    solutionEl.appendChild(solutionTitle);
+
+    const solutionSteps = issue.solution || [];
+    if (solutionSteps.length) {
+      const ol = document.createElement("ol");
+      solutionSteps.forEach((step) => {
+        const li = document.createElement("li");
+        li.innerHTML = escapeHtml(step)
+          .replace(/`([^`]+)`/g, '<code>$1</code>')
+          .replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+        ol.appendChild(li);
+      });
+      solutionEl.appendChild(ol);
+    } else {
+      const hint = document.createElement("p");
+      hint.style.cssText = "margin:0;color:var(--muted);font-size:0.82rem;";
+      hint.textContent = "Дополнительная информация отсутствует.";
+      solutionEl.appendChild(hint);
+    }
+
+    issueEl.appendChild(solutionEl);
+
+    solutionBtn.addEventListener("click", () => {
+      solutionEl.classList.toggle("hidden");
+      solutionBtn.textContent = solutionEl.classList.contains("hidden") ? "Как исправить" : "Скрыть решение";
+    });
+    systemCheckList.appendChild(issueEl);
+  });
+}
+
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function handleSystemCheckFix(issue) {
+  if (issue.fix_action === "open_url" && issue.fix_url) {
+    window.open(issue.fix_url, "_blank");
+  } else if (issue.fix_action === "open_presets") {
+    loadingScreen?.classList.remove("hidden");
+    document.querySelector(".shell")?.classList.add("hidden");
+    setLoadingMode("launch");
+  } else if (issue.fix_action === "env_hint") {
+    const steps = (issue.solution || []).join("\n");
+    const text = steps ? `${issue.title}\n\n${issue.message}\n\n${steps}` : `${issue.title}\n\n${issue.message}`;
+    alert(text);
+  }
+  // Не закрываем баннер автоматически — пусть пользователь сам закроет
+}
+
+if (systemCheckClose) {
+  systemCheckClose.addEventListener("click", () => {
+    try {
+      const ids = getDismissedSystemCheckIssues();
+      document.querySelectorAll(".system-check-issue").forEach((node) => {
+        if (node.dataset.issueId) ids.add(node.dataset.issueId);
+      });
+      localStorage.setItem("jarvis.dismissedSystemChecks", JSON.stringify([...ids]));
+    } catch {}
+    systemCheckBanner.classList.add("hidden");
+  });
+}
+
+// === Self-update ===
+function setUpdateModalOpen(open) {
+  if (!updateModal) return;
+  updateModal.classList.toggle("hidden", !open);
+  updateModal.setAttribute("aria-hidden", open ? "false" : "true");
+}
+
+async function checkForUpdate() {
+  try {
+    const response = await fetch("/api/update/check");
+    const data = await response.json();
+    if (!response.ok || !data.ok) return;
+    if (!data.available) return;
+
+    if (updateCurrentVersion) updateCurrentVersion.textContent = (data.current || "").slice(0, 12);
+    if (updateLatestVersion) updateLatestVersion.textContent = (data.latest || "").slice(0, 12);
+    if (updateError) {
+      updateError.textContent = "";
+      updateError.classList.add("hidden");
+    }
+    setUpdateModalOpen(true);
+  } catch {
+    // Silently ignore update check failures.
+  }
+}
+
+async function applyUpdate() {
+  if (!updateNowBtn || !updateError) return;
+  updateNowBtn.disabled = true;
+  updateNowBtn.textContent = "Обновление...";
+  try {
+    const response = await fetch("/api/update/apply", { method: "POST" });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      throw new Error(data.detail || "Не удалось обновить приложение");
+    }
+    if (!data.restarted) {
+      setUpdateModalOpen(false);
+      return;
+    }
+    updateNowBtn.textContent = "Перезапуск...";
+    // The backend will terminate the process; the updater will relaunch the app.
+  } catch (error) {
+    updateError.textContent = error.message;
+    updateError.classList.remove("hidden");
+    updateNowBtn.disabled = false;
+    updateNowBtn.textContent = "Обновить";
+  }
+}
+
+if (updateLaterBtn) {
+  updateLaterBtn.addEventListener("click", () => setUpdateModalOpen(false));
+}
+if (updateNowBtn) {
+  updateNowBtn.addEventListener("click", applyUpdate);
+}
+
 function updateVoiceOverlay(state) {
   if (!voiceOverlay || !voiceOverlayStatus || !voiceOverlayTranscript) {
     return;
@@ -392,6 +858,68 @@ function queueVoiceSubmission(commandText) {
   chatForm.requestSubmit();
 }
 
+async function toggleVoiceMessageRecording() {
+  if (!voiceMessageBtn) {
+    return;
+  }
+
+  if (isRecordingVoiceMessage) {
+    voiceMessageBtn.disabled = true;
+    voiceMessageBtn.setAttribute("aria-label", "Расшифровываю запись...");
+    setLiveStatus("📝 Расшифровываю всю запись...", true);
+
+    try {
+      const response = await fetch("/api/voice/record_message/stop", { method: "POST" });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.detail || data.error || "Ошибка расшифровки");
+      }
+
+      const text = String(data.text || "").trim();
+      if (text) {
+        const prefix = messageInput.value ? `${messageInput.value}\n` : "";
+        messageInput.value = prefix + text;
+        autoResizeMessageInput();
+        messageInput.focus();
+        setLiveStatus("Голосовое сообщение расшифровано", false);
+      } else {
+        setLiveStatus("Ничего не распознано", false);
+      }
+    } catch (error) {
+      setLiveStatus(`Ошибка расшифровки: ${error.message}`, false);
+    } finally {
+      isRecordingVoiceMessage = false;
+      voiceMessageBtn.disabled = false;
+      voiceMessageBtn.classList.remove("recording");
+      voiceMessageBtn.setAttribute("aria-label", "Записать голосовое сообщение");
+    }
+    return;
+  }
+
+  if (isChatBusy()) {
+    setLiveStatus("Дождитесь окончания текущего ответа", false);
+    return;
+  }
+
+  isRecordingVoiceMessage = true;
+  voiceMessageBtn.classList.add("recording");
+  voiceMessageBtn.setAttribute("aria-label", "Идёт запись...");
+  setLiveStatus("🔴 Записываю голосовое сообщение. Нажмите ещё раз для остановки", true);
+
+  try {
+    const response = await fetch("/api/voice/record_message/start", { method: "POST" });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      throw new Error(data.detail || "Ошибка распознавания");
+    }
+  } catch (error) {
+    isRecordingVoiceMessage = false;
+    voiceMessageBtn.classList.remove("recording");
+    voiceMessageBtn.setAttribute("aria-label", "Записать голосовое сообщение");
+    setLiveStatus(`Ошибка записи: ${error.message}`, false);
+  }
+}
+
 async function pollVoiceState() {
   try {
     const response = await fetch("/api/voice/state", { cache: "no-store" });
@@ -429,6 +957,19 @@ async function pollVoiceState() {
       const finalText = String(data.final_text || data.live_text || "").trim();
       if (finalText) {
         queueVoiceSubmission(finalText);
+      }
+    }
+
+    if (voskDownloadBanner) {
+      const missing = Boolean(data.model_missing) && !Boolean(data.model_downloading);
+      voskDownloadBanner.classList.toggle("hidden", !missing);
+      if (voskDownloadBtn) {
+        voskDownloadBtn.disabled = Boolean(data.model_downloading);
+      }
+      if (voskDownloadStatus && data.model_downloading) {
+        voskDownloadStatus.textContent = "Скачивание…";
+      } else if (voskDownloadStatus) {
+        voskDownloadStatus.textContent = "";
       }
     }
   } catch {}
@@ -764,6 +1305,7 @@ function renderChatList() {
           aria-label="Действия для чата ${escapeHtml(chat.title || "Новый чат")}"
         >...</button>
         <div class="chat-menu ${openChatMenuId === chat.id ? "" : "hidden"}" data-chat-menu="${chat.id}">
+          <button type="button" class="chat-menu-item" data-chat-action="summarize" data-chat-id="${chat.id}">Сжать контекст</button>
           <button type="button" class="chat-menu-item" data-chat-action="rename" data-chat-id="${chat.id}">Переименовать</button>
           <button type="button" class="chat-menu-item danger" data-chat-action="delete" data-chat-id="${chat.id}">Удалить</button>
         </div>
@@ -839,7 +1381,9 @@ async function loadChats() {
 
   chatsCache = Array.isArray(data.chats) ? data.chats : [];
   if (!currentChatId) {
-    currentChatId = data.active_chat_id || chatsCache[0]?.id || null;
+    // Don't auto-select the most recent chat on startup: an empty UI must
+    // mean a truly new/empty context, not a hidden long history.
+    currentChatId = data.active_chat_id || null;
   }
   updateHeroChatTitle();
   renderChatList();
@@ -999,13 +1543,10 @@ function restoreThinkingMessage(snapshot) {
   });
 
   node.article.dataset.thinkingStateId = node.thinkingStateId;
-  node.thinkingContent.classList.toggle("collapsed", !state.expanded);
-  state.toggleNode.classList.toggle("expanded", state.expanded);
+  state.expanded = true;
+  node.thinkingContent.classList.remove("collapsed");
   updateThinkingToggle(state);
-
-  if (state.timeline.length > 0 || state.expanded) {
-    renderThinkingTimeline(state);
-  }
+  renderThinkingTimeline(state);
 }
 
 function restoreChatUiState(messages = []) {
@@ -1070,6 +1611,41 @@ async function renameChat(chatId) {
   openChatMenuId = null;
   upsertChatSummary(data.chat);
   renderChatList();
+}
+
+async function summarizeChat(chatId) {
+  if (isChatBusy()) {
+    return;
+  }
+
+  const current = chatsCache.find((chat) => chat.id === chatId);
+  const ok = window.confirm(
+    `Сжать контекст чата "${current?.title || "Новый чат"}"? Последние сообщения и цепочка текущих инструментов сохранятся.`
+  );
+  if (!ok) {
+    return;
+  }
+
+  setLiveStatus("Сжимаю контекст через активную модель...", true);
+  try {
+    const response = await fetch(`/api/chats/${encodeURIComponent(chatId)}/summarize`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ keep_last_n: 12, max_summary_tokens: 2048 }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      throw new Error(data.detail || "Не удалось сжать контекст");
+    }
+
+    openChatMenuId = null;
+    upsertChatSummary(data.chat);
+    await openChat(chatId);
+    await refreshContext();
+    setLiveStatus("Контекст сжат", false);
+  } catch (error) {
+    setLiveStatus(`Ошибка сжатия контекста: ${error.message}`, false);
+  }
 }
 
 async function deleteChat(chatId) {
@@ -1180,6 +1756,102 @@ function appendMessageImages(node, images = []) {
   node.appendChild(gallery);
 }
 
+function addImageGenPlaceholder(toolCallId, width, height, article) {
+  removeImageGenPlaceholder(toolCallId);
+  const wrap = document.createElement("div");
+  wrap.className = "image-gen-preview-wrap";
+  wrap.dataset.imageGenId = toolCallId;
+
+  const preview = document.createElement("div");
+  preview.className = "image-gen-preview";
+  const w = Math.max(64, Math.min(2048, Number(width) || 512));
+  const h = Math.max(64, Math.min(2048, Number(height) || 512));
+  preview.style.setProperty("--ig-width", String(w));
+  preview.style.setProperty("--ig-height", String(h));
+
+  wrap.appendChild(preview);
+  article.appendChild(wrap);
+  activeImageGenPlaceholders.set(toolCallId, wrap);
+  scrollToBottomIfFollowing();
+  return wrap;
+}
+
+function resolveImageGenPlaceholder(toolCallId, src) {
+  const wrap = activeImageGenPlaceholders.get(toolCallId);
+  if (!wrap) {
+    return;
+  }
+  const preview = wrap.querySelector(".image-gen-preview");
+  if (!preview) {
+    return;
+  }
+  preview.innerHTML = "";
+  const img = document.createElement("img");
+  img.src = src;
+  img.alt = "generated image";
+  preview.appendChild(img);
+  activeImageGenPlaceholders.delete(toolCallId);
+  scrollToBottomIfFollowing();
+}
+
+function updateImageGenPlaceholderProgress(toolCallId, percent) {
+  const pct = Math.max(0, Math.min(100, Math.round(percent || 0)));
+  let wrap = activeImageGenPlaceholders.get(toolCallId);
+  if (!wrap) {
+    // Fallback: update the most recent placeholder if id was not provided or mismatched.
+    const entries = Array.from(activeImageGenPlaceholders.entries());
+    if (!entries.length) {
+      return;
+    }
+    wrap = entries[entries.length - 1][1];
+  }
+  const preview = wrap.querySelector(".image-gen-preview");
+  if (!preview) {
+    return;
+  }
+  let track = preview.querySelector(".image-gen-progress-track");
+  let bar = preview.querySelector(".image-gen-progress-bar");
+  let label = preview.querySelector(".image-gen-progress-label");
+  if (!track) {
+    label = document.createElement("div");
+    label.className = "image-gen-progress-label";
+    label.textContent = "Генерация… ";
+    const pctSpan = document.createElement("span");
+    pctSpan.className = "image-gen-progress-text";
+    pctSpan.textContent = `${pct}%`;
+    label.appendChild(pctSpan);
+
+    bar = document.createElement("div");
+    bar.className = "image-gen-progress-bar";
+    track = document.createElement("div");
+    track.className = "image-gen-progress-track";
+    track.appendChild(bar);
+
+    preview.appendChild(label);
+    preview.appendChild(track);
+  }
+  bar.style.width = `${pct}%`;
+  const pctSpan = label.querySelector(".image-gen-progress-text");
+  if (pctSpan) {
+    pctSpan.textContent = `${pct}%`;
+  }
+}
+
+function removeImageGenPlaceholder(toolCallId) {
+  const wrap = activeImageGenPlaceholders.get(toolCallId);
+  if (wrap) {
+    wrap.remove();
+    activeImageGenPlaceholders.delete(toolCallId);
+  }
+}
+
+function clearImageGenPlaceholders() {
+  for (const wrap of activeImageGenPlaceholders.values()) {
+    wrap.remove();
+  }
+  activeImageGenPlaceholders.clear();
+}
+
 function getValidImageSources(images = []) {
   return images.filter((src) => typeof src === "string" && src.startsWith("data:image/"));
 }
@@ -1217,22 +1889,38 @@ function createMessage(role, body = "", options = {}) {
   const article = fragment.querySelector(".message");
   const roleNode = fragment.querySelector(".message-role");
   const bodyNode = fragment.querySelector(".message-body");
+  const actionsNode = fragment.querySelector(".message-actions");
   const images = getValidImageSources(options.images || []);
 
   article.classList.add(role);
   article.dataset.role = role;
   article.dataset.images = JSON.stringify(images);
   roleNode.textContent =
-    role === "user" ? "You" :
+    role === "user" ? "" :
     role === "assistant" ? "Jarvis" :
     role === "thinking" ? "" :
     role === "tool" ? "" :
     "System";
 
+  if (actionsNode) {
+    if (role === "user") {
+      const copyBtn = actionsNode.querySelector(".copy-action");
+      const editBtn = actionsNode.querySelector(".edit-action");
+      if (copyBtn) {
+        copyBtn.addEventListener("click", () => copyMessageText(article));
+      }
+      if (editBtn) {
+        editBtn.addEventListener("click", () => editMessageText(article));
+      }
+    } else {
+      actionsNode.style.display = "none";
+    }
+  }
+
   if (role === "thinking") {
     bodyNode.innerHTML = '';
     const toggle = document.createElement('div');
-    toggle.className = 'thinking-toggle still-thinking';
+    toggle.className = 'thinking-toggle';
     toggle.innerHTML = `
       <span class="thinking-mode-indicator" aria-hidden="true"></span>
       <span class="thinking-toggle-copy">
@@ -1240,18 +1928,41 @@ function createMessage(role, body = "", options = {}) {
         <span class="thinking-activity-text">Модель анализирует запрос…</span>
       </span>
       <span class="timeline-count"></span>
-      <span class="chevron">▼</span>
     `;
 
     const content = document.createElement('div');
-    content.className = 'thinking-content collapsed';
+    content.className = 'thinking-content';
+    const stateId = `thinking-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     bodyNode.appendChild(toggle);
     bodyNode.appendChild(content);
 
-    const stateId = `thinking-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    toggle.setAttribute("role", "button");
+    toggle.setAttribute("tabindex", "0");
+    const toggleThinking = () => {
+      const state = thinkingStates.get(stateId);
+      if (!state) return;
+      state.expanded = !state.expanded;
+      content.classList.toggle("collapsed", !state.expanded);
+      updateThinkingToggle(state);
+      if (state.expanded) {
+        renderThinkingTimeline(state);
+      }
+    };
+    toggle.addEventListener("click", toggleThinking);
+    toggle.addEventListener("mousedown", (event) => {
+      // Не даём браузеру начать выделение заголовка вместо раскрытия блока.
+      event.preventDefault();
+    });
+    toggle.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        toggleThinking();
+      }
+    });
+
     thinkingStates.set(stateId, {
-      expanded: false,
+      expanded: true,
       buffer: body || "",
       timeline: [],
       activeThoughtId: null,
@@ -1269,37 +1980,183 @@ function createMessage(role, body = "", options = {}) {
 
     updateThinkingToggle(thinkingStates.get(stateId));
 
-    // Обработчик клика для сворачивания/разворачивания
-    toggle.addEventListener('click', () => {
-      const state = thinkingStates.get(stateId);
-      if (!state) return;
-
-      state.expanded = !state.expanded;
-      toggle.classList.toggle('expanded', state.expanded);
-      content.classList.toggle('collapsed', !state.expanded);
-
-      if (state.expanded) {
-        renderThinkingTimeline(state, { animate: true });
-      }
-      persistCurrentChatState();
-    });
-
     chatLog.appendChild(fragment);
     article.dataset.thinkingStateId = stateId;
     syncEmptyChatState();
-    chatLog.scrollTop = chatLog.scrollHeight;
+    scrollToBottomIfFollowing();
     return { article, bodyNode, roleNode, thinkingStateId: stateId, thinkingContent: content };
   }
 
   setMessageBody(bodyNode, body, options);
   chatLog.appendChild(fragment);
   syncEmptyChatState();
-  chatLog.scrollTop = chatLog.scrollHeight;
+  scrollToBottomIfFollowing();
   return { article, bodyNode, roleNode };
 }
 
 function addMessage(role, body, options = {}) {
   return createMessage(role, body, options);
+}
+
+async function copyMessageText(articleNode) {
+  if (!articleNode) return;
+  const bodyNode = articleNode.querySelector(".message-body");
+  if (!bodyNode) return;
+  const text = bodyNode.textContent || "";
+  try {
+    await navigator.clipboard.writeText(text);
+    const copyBtn = articleNode.querySelector(".copy-action span");
+    if (copyBtn) {
+      const original = copyBtn.textContent;
+      copyBtn.textContent = "Скопировано";
+      setTimeout(() => {
+        copyBtn.textContent = original;
+      }, 1200);
+    }
+  } catch (error) {
+    console.error("Failed to copy message:", error);
+  }
+}
+
+function editMessageText(articleNode) {
+  if (!articleNode) return;
+  if (isGeneratingResponse) {
+    setLiveStatus("Нельзя изменить сообщение во время генерации", false);
+    return;
+  }
+  startMessageEdit(articleNode);
+}
+
+function startMessageEdit(articleNode) {
+  if (!articleNode) return;
+  const bodyNode = articleNode.querySelector(".message-body");
+  const actionsNode = articleNode.querySelector(".message-actions");
+  if (!bodyNode || bodyNode.querySelector(".message-edit-textarea")) return;
+
+  const originalText = bodyNode.dataset.rawText || bodyNode.textContent || "";
+  bodyNode.dataset.editOriginal = originalText;
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "message-edit-wrapper";
+  wrapper.innerHTML = `
+    <textarea class="message-edit-textarea" rows="3">${escapeHtml(originalText)}</textarea>
+    <div class="message-edit-actions">
+      <button type="button" class="message-edit-btn save">Сохранить</button>
+      <button type="button" class="message-edit-btn cancel">Отмена</button>
+    </div>
+  `;
+
+  bodyNode.innerHTML = "";
+  bodyNode.appendChild(wrapper);
+  bodyNode.classList.add("is-editing");
+  if (actionsNode) actionsNode.style.display = "none";
+
+  const textarea = wrapper.querySelector(".message-edit-textarea");
+  textarea.focus();
+  textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  autoResizeEditTextarea(textarea);
+  textarea.addEventListener("input", () => autoResizeEditTextarea(textarea));
+
+  wrapper.querySelector(".save").addEventListener("click", () => saveMessageEdit(articleNode));
+  wrapper.querySelector(".cancel").addEventListener("click", () => cancelMessageEdit(articleNode));
+  textarea.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      saveMessageEdit(articleNode);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      cancelMessageEdit(articleNode);
+    }
+  });
+}
+
+function autoResizeEditTextarea(textarea) {
+  if (!textarea) return;
+  textarea.style.height = "auto";
+  textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, 60), 320)}px`;
+}
+
+function cancelMessageEdit(articleNode) {
+  if (!articleNode) return;
+  const bodyNode = articleNode.querySelector(".message-body");
+  const actionsNode = articleNode.querySelector(".message-actions");
+  if (!bodyNode) return;
+  const originalText = bodyNode.dataset.editOriginal || "";
+  setMessageBody(bodyNode, originalText);
+  delete bodyNode.dataset.editOriginal;
+  bodyNode.classList.remove("is-editing");
+  if (actionsNode) actionsNode.style.display = "";
+}
+
+async function saveMessageEdit(articleNode) {
+  if (!articleNode || !currentChatId || isGeneratingResponse) return;
+  const bodyNode = articleNode.querySelector(".message-body");
+  const actionsNode = articleNode.querySelector(".message-actions");
+  if (!bodyNode) return;
+
+  const textarea = bodyNode.querySelector(".message-edit-textarea");
+  const newText = (textarea?.value || "").trim();
+  if (!newText) return;
+
+  const originalText = bodyNode.dataset.editOriginal || "";
+  if (newText === originalText) {
+    cancelMessageEdit(articleNode);
+    return;
+  }
+
+  const messageIndex = Array.from(chatLog.children).indexOf(articleNode);
+  if (messageIndex < 0) return;
+
+  let images = [];
+  try {
+    images = JSON.parse(articleNode.dataset.images || "[]");
+  } catch {
+    images = [];
+  }
+
+  bodyNode.classList.remove("is-editing");
+  delete bodyNode.dataset.editOriginal;
+  setMessageBody(bodyNode, newText);
+  if (actionsNode) actionsNode.style.display = "";
+
+  // Remove everything after the edited message from DOM.
+  const children = Array.from(chatLog.children);
+  for (let i = messageIndex + 1; i < children.length; i++) {
+    const child = children[i];
+    const stateId = child.dataset.thinkingStateId;
+    if (stateId && thinkingStates.has(stateId)) {
+      thinkingStates.delete(stateId);
+    }
+    child.remove();
+  }
+  syncEmptyChatState();
+
+  await persistCurrentChatState({ immediate: true });
+
+  try {
+    const response = await fetch(`/api/chats/${encodeURIComponent(currentChatId)}/edit-message`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message_index: messageIndex, new_text: newText }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      throw new Error(data.detail || "Не удалось изменить сообщение");
+    }
+    upsertChatSummary(data.chat);
+  } catch (error) {
+    addMessage("system", `Ошибка изменения сообщения: ${error.message}`);
+    setLiveStatus("Ошибка изменения сообщения", false);
+    return;
+  }
+
+  // Start a new response for the edited message.
+  messageInput.value = "";
+  autoResizeMessageInput();
+  clearPendingImages();
+  setGeneratingState(true, 0);
+  startLiveStatusTimer("Обработка контекста...");
+  await runChatStream(newText, images, { skipUserAppend: true });
 }
 
 function escapeHtml(text) {
@@ -1782,7 +2639,18 @@ function renderInline(text) {
   return tokenStore.restore(html);
 }
 
+function renderImageTags(text) {
+  if (typeof text !== "string") return text;
+  return text.replace(/\(image\)\[([^\]]+)\]/g, (_, rawPath) => {
+    const path = rawPath.trim();
+    const filename = path.split("/").pop() || path.split("\\").pop() || path;
+    const safeFilename = encodeURIComponent(filename);
+    return `\n<img src="/images/${safeFilename}" class="chat-image" alt="image" loading="lazy">\n`;
+  });
+}
+
 function renderRichText(text) {
+  text = renderImageTags(text);
   const { text: textWithoutCode, blocks: codeBlocks } = extractCodeBlocks(text);
   const normalized = renderTablesInText(textWithoutCode);
 
@@ -2189,6 +3057,43 @@ function setMessageBody(node, text, options = {}) {
   node.dataset.renderedVisibleText = node.textContent || "";
 }
 
+function renderMessageSpeed(articleNode, timings) {
+  const existing = articleNode?.querySelector(".message-speed");
+  if (existing) {
+    existing.remove();
+  }
+  if (!timings || !timings.predicted_per_second) {
+    return;
+  }
+  const tps = parseFloat(timings.predicted_per_second);
+  if (!Number.isFinite(tps) || tps <= 0) {
+    return;
+  }
+  const el = document.createElement("div");
+  el.className = "message-speed";
+  el.textContent = `⚡ ~${tps.toFixed(1)} tok/s`;
+
+  const promptN = Number(timings.prompt_n) || 0;
+  const promptMs = Number(timings.prompt_ms) || 0;
+  const promptSpeed = Number(timings.prompt_per_second) || 0;
+  const predictedN = Number(timings.predicted_n) || 0;
+  const predictedMs = Number(timings.predicted_ms) || 0;
+  const lines = [
+    `decode: ${predictedN} tok / ${(predictedMs / 1000).toFixed(2)} s = ${tps.toFixed(1)} tok/s`,
+  ];
+  if (promptN > 0 && promptMs > 0) {
+    lines.push(
+      `prefill: ${promptN} tok / ${(promptMs / 1000).toFixed(2)} s = ${promptSpeed.toFixed(1)} tok/s`
+    );
+  }
+  if (timings.cache_n) {
+    lines.push(`cache: ${timings.cache_n} tok`);
+  }
+  el.title = lines.join("\n");
+
+  articleNode.appendChild(el);
+}
+
 function setServerState(isOnline) {
   serverIsOnline = isOnline;
   heroBadge.textContent = isOnline ? "online" : "offline";
@@ -2239,7 +3144,7 @@ function getThinkingEventCount(state) {
     return 0;
   }
   return state.timeline.filter((entry) => {
-    if (entry.type === "tool") {
+    if (entry.type === "tool" || entry.type === "tool_streaming") {
       return true;
     }
     if (entry.type === "thought") {
@@ -2277,10 +3182,14 @@ function updateThinkingToggle(state) {
   const countNode = toggle.querySelector(".timeline-count");
 
   toggle.classList.toggle("still-thinking", state.mode !== "done");
-  toggle.classList.toggle("mode-tool", state.mode === "tool");
+  toggle.classList.toggle("mode-tool", state.mode === "tool" || state.mode === "tool_writing");
 
   if (toggleText) {
-    if (state.mode === "tool" && state.activeToolName) {
+    if (state.mode === "tool_writing" && state.activeToolName) {
+      toggleText.textContent = `Пишет ${state.activeToolName}`;
+    } else if (state.mode === "tool_writing") {
+      toggleText.textContent = "Пишет инструмент";
+    } else if (state.mode === "tool" && state.activeToolName) {
       toggleText.textContent = `Жду ${state.activeToolName}`;
     } else if (state.toolCount > 0) {
       toggleText.textContent = "Мысли и инструменты";
@@ -2347,6 +3256,11 @@ function scheduleThinkingIdleActivity(state) {
       return;
     }
 
+    if (state.mode === "tool_writing" && state.activeToolName) {
+      setThinkingActivity(state, `Модель пишет инструмент ${state.activeToolName}…`);
+      return;
+    }
+
     if (state.mode === "tool" && state.activeToolName) {
       setThinkingActivity(state, `Инструмент ${state.activeToolName} выполняется…`);
       return;
@@ -2406,7 +3320,20 @@ function syncThoughtTimeline(state, content) {
   updateThinkingToggle(state);
   scheduleThinkingIdleActivity(state);
   if (state.expanded) {
-    renderThinkingTimeline(state, { animate: true });
+    const row = state.contentNode?.querySelector(
+      `.timeline-row[data-entry-id="${CSS.escape(entry.id)}"]`
+    );
+    const thoughtBody = row?.querySelector(".timeline-thought-body");
+    const preview = row?.querySelector(".timeline-row-preview");
+    if (thoughtBody) {
+      patchStreamingRichText(thoughtBody, entry.content);
+      thoughtBody.dataset.entryId = entry.id;
+      if (preview) {
+        preview.textContent = makeTimelinePreview(entry.content);
+      }
+    } else {
+      renderThinkingTimeline(state, { animate: true });
+    }
   }
 }
 
@@ -2478,11 +3405,197 @@ function updateToolTimelineEntry(state, toolCallId, result, success, images = []
   }
 }
 
+function formatStreamingToolArgs(argumentsJson) {
+  if (!argumentsJson) {
+    return "";
+  }
+  try {
+    const parsed = JSON.parse(argumentsJson);
+    return JSON.stringify(parsed, null, 2);
+  } catch {
+    return String(argumentsJson);
+  }
+}
+
+function upsertStreamingToolTimelineEntry(state, toolCallId, toolName, argumentsJson, stage) {
+  completeThoughtTimelineEntry(state);
+  state.mode = "tool_writing";
+  state.activeToolName = toolName || "";
+  state.lastEventKind = "tool_call";
+  state.activityLabel = toolName
+    ? `Модель пишет инструмент ${toolName}…`
+    : "Модель пишет инструмент…";
+
+  const existing = state.timeline.find((item) => item.type === "tool_streaming" && item.id === toolCallId);
+  if (existing) {
+    existing.name = toolName || existing.name || "tool";
+    existing.argsFormatted = formatStreamingToolArgs(argumentsJson);
+    existing.stage = stage;
+  } else {
+    state.timeline.push({
+      id: toolCallId,
+      type: "tool_streaming",
+      name: toolName || "tool",
+      argsFormatted: formatStreamingToolArgs(argumentsJson),
+      resultFormatted: "",
+      images: [],
+      success: null,
+      status: "streaming",
+      stage: stage,
+    });
+    state.toolCount += 1;
+  }
+  updateThinkingToggle(state);
+  scheduleThinkingIdleActivity(state);
+  if (state.expanded) {
+    const row = state.contentNode?.querySelector(
+      `.timeline-row[data-entry-id="${CSS.escape(toolCallId)}"]`
+    );
+    if (existing && row) {
+      const nameNode = row.querySelector(".timeline-row-name");
+      const argsNode = row.querySelector(".tool-args");
+      if (nameNode) nameNode.textContent = existing.name;
+      if (argsNode) argsNode.textContent = existing.argsFormatted;
+    } else {
+      renderThinkingTimeline(state);
+    }
+  }
+}
+
+function finalizeStreamingToolTimelineEntry(state, toolCallId) {
+  const entry = state.timeline.find((item) => item.type === "tool_streaming" && item.id === toolCallId);
+  if (!entry) {
+    return;
+  }
+  entry.stage = "finish";
+  entry.status = "queued";
+  state.activityLabel = entry.name
+    ? `Модель закончила писать ${entry.name}, жду выполнения…`
+    : "Модель закончила писать инструмент, жду выполнения…";
+  updateThinkingToggle(state);
+  scheduleThinkingIdleActivity(state);
+  if (state.expanded) {
+    renderThinkingTimeline(state);
+  }
+}
+
+function cancelStreamingToolTimelineEntry(state, toolCallId, reason = "Поток вызова инструмента прерван") {
+  const entry = state.timeline.find((item) => item.id === toolCallId);
+  if (!entry) {
+    return;
+  }
+
+  entry.type = "tool";
+  entry.status = "error";
+  entry.success = false;
+  entry.stage = "cancelled";
+  entry.resultFormatted = reason || "Поток вызова инструмента прерван";
+  state.mode = "thinking";
+  state.activeToolName = "";
+  state.lastEventKind = "tool_result";
+  state.activityLabel = "Модель продолжает после ошибки инструмента…";
+  updateThinkingToggle(state);
+  scheduleThinkingIdleActivity(state);
+  if (state.expanded) {
+    renderThinkingTimeline(state);
+  }
+}
+
+function promoteStreamingToolToWorking(state, toolCallId, toolName, args) {
+  const index = state.timeline.findIndex((item) => item.type === "tool_streaming" && item.id === toolCallId);
+  if (index >= 0) {
+    const wasExpanded = Boolean(state.timeline[index].expanded);
+    state.timeline[index] = {
+      id: toolCallId,
+      type: "tool",
+      name: toolName || state.timeline[index].name || "tool",
+      argsFormatted: formatToolPayload(args || {}),
+      resultFormatted: "",
+      images: [],
+      success: null,
+      status: "working",
+      expanded: wasExpanded,
+    };
+  } else {
+    addToolTimelineEntry(state, toolName, args, toolCallId);
+    return;
+  }
+  state.mode = "tool";
+  state.activeToolName = toolName || "";
+  state.lastEventKind = "tool_call";
+  state.activityLabel = toolName
+    ? `Модель вызывает ${toolName}…`
+    : "Модель вызывает инструмент…";
+  updateThinkingToggle(state);
+  scheduleThinkingIdleActivity(state);
+  if (state.expanded) {
+    renderThinkingTimeline(state);
+  }
+}
+
+function stripHtmlForPreview(html) {
+  const tmp = document.createElement("div");
+  tmp.innerHTML = String(html || "").replace(/<br\s*\/?>/gi, " ");
+  return (tmp.textContent || tmp.innerText || "").replace(/\s+/g, " ").trim();
+}
+
+function formatTimelinePreview(text, maxLen = 90) {
+  const plain = stripHtmlForPreview(text);
+  if (!plain) return "(пусто)";
+  if (plain.length <= maxLen) return plain;
+  return plain.slice(0, maxLen).trimEnd() + "…";
+}
+
+function getTimelineRowStatus(entry) {
+  if (entry.type === "tool_streaming") {
+    const isFinished = entry.stage === "finish" || entry.status === "queued";
+    return {
+      class: isFinished ? "queued" : "streaming",
+      text: isFinished ? "готов" : "пишет",
+      dotClass: isFinished ? "queued" : "streaming",
+    };
+  }
+  if (entry.type === "tool") {
+    const map = {
+      working: { class: "working", text: "выполняется", dotClass: "working" },
+      success: { class: "success", text: "готово", dotClass: "success" },
+      error:   { class: "error",   text: "ошибка",    dotClass: "error" },
+    };
+    return map[entry.status] || { class: entry.status, text: entry.status, dotClass: entry.status };
+  }
+  // thought
+  return {
+    class: "thought",
+    text: entry.completed ? "завершена" : "пишет",
+    dotClass: entry.completed ? "completed" : "streaming",
+  };
+}
+
+function makeTimelinePreview(content, maxLength = 90) {
+  const text = String(content || "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return "…";
+  return text.length > maxLength ? text.slice(0, maxLength) + "…" : text;
+}
+
 function renderThinkingTimeline(state, options = {}) {
   if (!state?.contentNode) {
     return;
   }
 
+  // Remember which rows the user has expanded.
+  const expandedIds = new Set();
+  if (state.contentNode.querySelectorAll) {
+    for (const row of state.contentNode.querySelectorAll(".timeline-row")) {
+      if (row.classList.contains("expanded") && row.dataset.entryId) {
+        expandedIds.add(row.dataset.entryId);
+      }
+    }
+  }
+
+  // Preserve animation token-birth state across re-renders.
   const previousThoughtBirths = new Map();
   if (state.contentNode.querySelectorAll) {
     for (const thoughtBody of state.contentNode.querySelectorAll(".timeline-thought-body[data-entry-id]")) {
@@ -2491,62 +3604,98 @@ function renderThinkingTimeline(state, options = {}) {
   }
 
   const timelineHtml = state.timeline
-    .map((entry, index) => {
+    .map((entry) => {
+      const status = getTimelineRowStatus(entry);
+      const entryId = escapeHtml(entry.id || "");
+      const expandState = expandedIds.has(entry.id) ? "expanded" : "collapsed";
+
+      if (entry.type === "tool_streaming") {
+        return `
+          <div class="timeline-row tool-row streaming ${expandState}" data-entry-id="${entryId}" data-entry-type="tool_streaming">
+            <div class="timeline-row-header">
+              <span class="timeline-row-chevron" aria-hidden="true">▸</span>
+              <span class="timeline-row-dot streaming"></span>
+              <span class="timeline-row-name">${escapeHtml(entry.name)}</span>
+              <span class="timeline-row-status streaming">пишет…</span>
+            </div>
+            <div class="timeline-row-body">
+              <pre class="tool-block tool-args">${escapeHtml(entry.argsFormatted)}</pre>
+            </div>
+          </div>
+        `;
+      }
+
       if (entry.type === "tool") {
         const resultImagesHtml = buildImageGalleryHtml(entry.images || [], "timeline-tool-images");
         return `
-          <div class="timeline-entry tool-entry ${entry.status}">
-            <div class="timeline-entry-label">Инструмент</div>
-            <div class="timeline-tool-card">
-              <div class="timeline-tool-header">
-                <span class="timeline-tool-name">${escapeHtml(entry.name)}</span>
-                <span class="timeline-tool-status ${entry.status}">${escapeHtml(entry.status)}</span>
-              </div>
-              <div class="timeline-tool-section">
-                <div class="timeline-tool-section-title">Аргументы</div>
-                <pre>${escapeHtml(entry.argsFormatted)}</pre>
-              </div>
+          <div class="timeline-row tool-row ${entry.status} ${expandState}" data-entry-id="${entryId}" data-entry-type="tool">
+            <div class="timeline-row-header">
+              <span class="timeline-row-chevron" aria-hidden="true">▸</span>
+              <span class="timeline-row-dot ${status.dotClass}"></span>
+              <span class="timeline-row-name">${escapeHtml(entry.name)}</span>
+              <span class="timeline-row-status ${status.class}">${escapeHtml(status.text)}</span>
+            </div>
+            <div class="timeline-row-body">
+              <pre class="tool-block tool-args">${escapeHtml(entry.argsFormatted)}</pre>
               ${entry.resultFormatted ? `
-                <div class="timeline-tool-section ${entry.status}">
-                  <div class="timeline-tool-section-title">Результат</div>
-                  <pre>${escapeHtml(entry.resultFormatted)}</pre>
-                  ${resultImagesHtml}
-                </div>
-              ` : `
-                <div class="timeline-tool-pending">Инструмент выполняется…</div>
-              `}
+                <pre class="tool-block tool-result ${entry.status}">${escapeHtml(entry.resultFormatted)}</pre>
+                ${resultImagesHtml}
+              ` : ""}
             </div>
           </div>
         `;
       }
 
       const thoughtHtml = renderRichText(entry.content || "");
+      const thoughtPreview = makeTimelinePreview(entry.content || "");
       return `
-        <div class="timeline-entry thought-entry">
-          <div class="timeline-entry-label">Мысль</div>
-          <div class="timeline-thought-body" data-entry-id="${escapeHtml(entry.id)}">${thoughtHtml || "<p>(пусто)</p>"}</div>
+        <div class="timeline-row thought-row ${entry.completed ? "completed" : "streaming"} ${expandState}" data-entry-id="${entryId}" data-entry-type="thought">
+          <div class="timeline-row-header">
+            <span class="timeline-row-chevron" aria-hidden="true">▸</span>
+            <span class="timeline-row-dot ${status.dotClass}"></span>
+            <span class="timeline-row-name">Мысль</span>
+            <span class="timeline-row-preview">${escapeHtml(thoughtPreview)}</span>
+          </div>
+          <div class="timeline-row-body" data-entry-id="${entryId}">
+            <div class="timeline-thought-body">${thoughtHtml || "<p>(пусто)</p>"}</div>
+          </div>
         </div>
       `;
     })
     .join("");
 
-  const previousVisibleText = state.contentNode.dataset.renderedVisibleText || "";
-  state.contentNode.innerHTML = `<div class="thinking-timeline">${timelineHtml}</div>`;
+  state.contentNode.innerHTML = `<div class="thinking-timeline codex-timeline">${timelineHtml}</div>`;
+
+  // Click header to expand/collapse a single row.
+  if (state.contentNode.querySelectorAll) {
+    for (const row of state.contentNode.querySelectorAll(".timeline-row")) {
+      const header = row.querySelector(".timeline-row-header");
+      if (header) {
+        header.addEventListener("mousedown", (event) => {
+          // Клик по строке должен работать даже во время потокового обновления.
+          event.preventDefault();
+        });
+        header.addEventListener("click", () => {
+          row.classList.toggle("collapsed");
+          row.classList.toggle("expanded");
+        });
+      }
+    }
+  }
 
   if (options.animate && state.contentNode.querySelectorAll) {
     for (const entry of state.timeline) {
       if (entry.type !== "thought") {
         continue;
       }
-      const thoughtBody = state.contentNode.querySelector(`.timeline-thought-body[data-entry-id="${entry.id}"]`);
+      const thoughtBody = state.contentNode.querySelector(`.timeline-row[data-entry-id="${entry.id}"] .timeline-thought-body`);
       if (!thoughtBody) {
         continue;
       }
+      thoughtBody.dataset.entryId = entry.id;
       animateStreamingTokens(thoughtBody, previousThoughtBirths.get(entry.id) || []);
     }
   }
-
-  state.contentNode.dataset.renderedVisibleText = state.contentNode.textContent || "";
 }
 
 function finalizeThinkingState(state) {
@@ -2595,12 +3744,251 @@ function fillPresetSetupDefaults(status) {
   if (!status) {
     return;
   }
-  if (presetLlamaInput && !presetLlamaInput.value && status.detected_llama_server) {
-    presetLlamaInput.value = status.detected_llama_server;
+  isMacOs = Boolean(status.is_macos);
+  if (presetBackendWrap) {
+    presetBackendWrap.classList.toggle("hidden", !isMacOs);
+  }
+  if (isMacOs) {
+    if (presetBackendSelect) {
+      presetBackendSelect.value = "mtplx";
+    }
+    updatePresetFormVisibility();
+    if (presetSetupLead) {
+      presetSetupLead.innerHTML = `Укажите параметры MTPLX-пресета. Native multi-token speculative decoding на Apple Silicon. Пресет сохранится в <code>jarvis_config.json</code>.`;
+    }
+    if (presetSetupHint) {
+      const configPath = status.config_path || "jarvis_config.json";
+      presetSetupHint.textContent = `Конфиг: ${configPath}. MTPLX-модели: huggingface.co/Youssofal`;
+    }
+  } else {
+    updatePresetFormVisibility();
+    if (presetLlamaInput && !presetLlamaInput.value && status.detected_llama_server) {
+      presetLlamaInput.value = status.detected_llama_server;
+    }
+    if (presetSetupHint) {
+      const configPath = status.config_path || "jarvis_config.json";
+      presetSetupHint.textContent = `Конфиг: ${configPath}. llama-server: github.com/ggerganov/llama.cpp/releases`;
+    }
+  }
+}
+
+function updatePresetFormVisibility() {
+  const backend = presetBackendSelect?.value || "llama-server";
+  const isMlx = backend === "mlx-vlm";
+  const isMtplx = backend === "mtplx";
+  const isLlama = !isMlx && !isMtplx;
+
+  if (presetLlamaFields) {
+    presetLlamaFields.classList.toggle("hidden", !isLlama);
+  }
+  if (presetLlamaExtraFields) {
+    presetLlamaExtraFields.classList.toggle("hidden", !isLlama);
+  }
+  if (presetMlxFields) {
+    presetMlxFields.classList.toggle("hidden", !isMlx);
+  }
+  if (presetMtplxFields) {
+    presetMtplxFields.classList.toggle("hidden", !isMtplx);
+  }
+
+  const llamaPort = presetPortInputLlama?.value || "8080";
+  const mlxPort = presetPortInput?.value || "8080";
+  const mtplxPort = presetMtplxPortInput?.value || "8080";
+  if (isMlx && presetPortInput && !presetPortInput.value) {
+    presetPortInput.value = llamaPort || mtplxPort;
+  } else if (isMtplx && presetMtplxPortInput && !presetMtplxPortInput.value) {
+    presetMtplxPortInput.value = llamaPort || mlxPort;
+  } else if (isLlama && presetPortInputLlama && !presetPortInputLlama.value) {
+    presetPortInputLlama.value = mlxPort || mtplxPort;
+  }
+
+  if (presetModelInput) {
+    presetModelInput.placeholder = isMlx
+      ? "/Users/roma/Models/mlx-community/Qwen2.5-0.5B-Instruct-MLX-8bit"
+      : (isMtplx
+        ? "/Users/roma/models/Qwen3.6-27B-MTPLX-Optimized-Speed"
+        : "C:\\models\\qwen.gguf");
+  }
+  if (presetLlamaInput) {
+    presetLlamaInput.required = isLlama;
+  }
+
+  if (isMacOs && presetSetupLead) {
+    if (isMlx) {
+      presetSetupLead.innerHTML = `Укажите параметры MLX-пресета. На macOS сервер поднимается через <strong>mlx-vlm</strong>. Пресет сохранится в <code>jarvis_config.json</code>.`;
+    } else if (isMtplx) {
+      presetSetupLead.innerHTML = `Укажите параметры MTPLX-пресета. Native multi-token speculative decoding на Apple Silicon. Пресет сохранится в <code>jarvis_config.json</code>.`;
+    } else {
+      presetSetupLead.innerHTML = `Укажите параметры пресета <strong>llama-server</strong>. Поля mmproj/MTP ниже — опциональные. Пресет сохранится в <code>jarvis_config.json</code>.`;
+    }
   }
   if (presetSetupHint) {
-    const configPath = status.config_path || "jarvis_config.json";
-    presetSetupHint.textContent = `Конфиг: ${configPath}. llama-server: github.com/ggerganov/llama.cpp/releases`;
+    const configPath = configCache?.config_path || "jarvis_config.json";
+    if (isMlx) {
+      presetSetupHint.textContent = `Конфиг: ${configPath}. MLX-модели: huggingface.co/mlx-community`;
+    } else if (isMtplx) {
+      presetSetupHint.textContent = `Конфиг: ${configPath}. MTPLX-модели: huggingface.co/Youssofal`;
+    } else {
+      presetSetupHint.textContent = `Конфиг: ${configPath}. llama-server: github.com/ggerganov/llama.cpp/releases`;
+    }
+  }
+}
+
+function formatBytes(value) {
+  const bytes = Number(value) || 0;
+  if (bytes === 0) {
+    return "0 B";
+  }
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return `${(bytes / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+function formatEta(seconds) {
+  const s = Math.max(0, Math.ceil(Number(seconds) || 0));
+  if (s < 60) {
+    return `${s} с`;
+  }
+  if (s < 3600) {
+    return `${Math.ceil(s / 60)} мин`;
+  }
+  return `${Math.floor(s / 3600)} ч ${Math.ceil((s % 3600) / 60)} мин`;
+}
+
+async function loadLocalModels() {
+  if (!presetLocalModelsSelect) {
+    return;
+  }
+  try {
+    const response = await fetch("/api/models/local");
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      throw new Error(data.detail || "Не удалось загрузить список локальных моделей");
+    }
+    localModelsCache = Array.isArray(data.models) ? data.models : [];
+    presetLocalModelsSelect.innerHTML = '<option value="">— выберите найденную модель —</option>';
+    for (const model of localModelsCache) {
+      const option = document.createElement("option");
+      option.value = model.path;
+      option.textContent = model.name;
+      presetLocalModelsSelect.appendChild(option);
+    }
+    presetLocalModelsSelect.classList.toggle("hidden", localModelsCache.length === 0);
+  } catch (error) {
+    console.error("Failed to load local models:", error);
+    if (presetLocalModelsSelect) {
+      presetLocalModelsSelect.classList.add("hidden");
+    }
+  }
+}
+
+function stopDownload() {
+  if (downloadEventSource) {
+    downloadEventSource.close();
+    downloadEventSource = null;
+  }
+}
+
+async function startModelDownload(repoId) {
+  if (!repoId) {
+    return;
+  }
+  stopDownload();
+  if (downloadProgressWrap) {
+    downloadProgressWrap.classList.remove("hidden");
+  }
+  if (downloadProgressBar) {
+    downloadProgressBar.style.width = "0%";
+  }
+  if (downloadProgressText) {
+    downloadProgressText.textContent = "0%";
+  }
+  if (downloadProgressMeta) {
+    downloadProgressMeta.textContent = "—";
+  }
+  if (downloadProgressHint) {
+    downloadProgressHint.textContent = "Подключение к HuggingFace...";
+  }
+  if (presetDownloadBtn) {
+    presetDownloadBtn.disabled = true;
+    presetDownloadBtn.textContent = "Скачивается...";
+  }
+
+  try {
+    const hfToken = presetHfTokenInput?.value?.trim() || "";
+    const response = await fetch("/api/models/download", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repo_id: repoId, local_dir: "", hf_token: hfToken }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || "Не удалось начать скачивание");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split("\n\n");
+      buffer = chunks.pop() || "";
+
+      for (const chunk of chunks) {
+        const line = chunk.split("\n").find((entry) => entry.startsWith("data: "));
+        if (!line) {
+          continue;
+        }
+        try {
+          const data = JSON.parse(line.slice(6));
+          if (data.type === "progress") {
+            const percent = Math.max(0, Math.min(100, Number(data.percent) || 0));
+            if (downloadProgressBar) {
+              downloadProgressBar.style.width = `${percent}%`;
+            }
+            if (downloadProgressText) {
+              downloadProgressText.textContent = `${percent.toFixed(1)}%`;
+            }
+            const speed = data.speed ? `${formatBytes(data.speed)}/с` : "—";
+            const eta = data.eta ? `≈ ${formatEta(data.eta)}` : "—";
+            const downloaded = formatBytes(data.downloaded || 0);
+            const total = formatBytes(data.total || 0);
+            if (downloadProgressMeta) {
+              downloadProgressMeta.textContent = `${downloaded} / ${total} · ${speed} · ${eta}`;
+            }
+            if (downloadProgressHint) {
+              downloadProgressHint.textContent = data.message || "Скачивание...";
+            }
+          } else if (data.type === "done") {
+            if (presetModelInput && data.path) {
+              presetModelInput.value = data.path;
+            }
+            if (downloadProgressHint) {
+              downloadProgressHint.textContent = `Готово: ${data.path || ""}`;
+            }
+          } else if (data.type === "error") {
+            throw new Error(data.error || "Ошибка скачивания");
+          }
+        } catch (parseError) {
+          console.error("Invalid download progress event:", parseError);
+        }
+      }
+    }
+  } catch (error) {
+    if (downloadProgressHint) {
+      downloadProgressHint.textContent = `Ошибка: ${error.message}`;
+    }
+  } finally {
+    if (presetDownloadBtn) {
+      presetDownloadBtn.disabled = false;
+      presetDownloadBtn.textContent = "Скачать";
+    }
   }
 }
 
@@ -2611,12 +3999,17 @@ function renderPresetCards() {
 
   presetCardList.innerHTML = "";
   for (const preset of configCache.presets || []) {
+    const backendBadge = preset.backend === "mlx-vlm"
+      ? '<span class="preset-card-badge">MLX</span>'
+      : (preset.backend === "mtplx"
+        ? '<span class="preset-card-badge">MTPLX</span>'
+        : "");
     const card = document.createElement("div");
     card.className = `preset-card${preset.selected ? " is-selected" : ""}`;
     card.dataset.presetIndex = String(preset.index);
     card.innerHTML = `
       <button type="button" class="preset-card-body" aria-label="Выбрать пресет ${escapeHtml(preset.name)}">
-        <div class="preset-card-title">${escapeHtml(preset.name)}</div>
+        <div class="preset-card-title">${escapeHtml(preset.name)} ${backendBadge}</div>
         <div class="preset-card-meta">${escapeHtml(preset.description)}</div>
         <div class="preset-card-path">${escapeHtml(preset.model_path)}</div>
       </button>
@@ -2663,6 +4056,135 @@ async function loadToolsCatalog() {
   } catch (error) {
     toolsCache = [];
     console.error(error);
+  }
+}
+
+function renderActivePlan(plan) {
+  if (!activePlanPanel || !activePlanToggle || !activePlanTitle || !activePlanList || !activePlanStepCount || !activePlanProgressFill) {
+    return;
+  }
+  if (!plan || !plan.title || !Array.isArray(plan.steps) || !plan.steps.length) {
+    activePlanPanel.classList.add("hidden");
+    activePlanPanel.classList.add("is-collapsed");
+    activePlanToggle.setAttribute("aria-expanded", "false");
+    activePlanTitle.textContent = "";
+    activePlanList.innerHTML = '<div class="active-plan-empty">Нет активного плана</div>';
+    activePlanStepCount.textContent = "0";
+    activePlanProgressFill.style.width = "0%";
+    return;
+  }
+
+  activePlanPanel.classList.remove("hidden");
+  activePlanPanel.classList.toggle("is-collapsed", activePlanCollapsed);
+  activePlanToggle.setAttribute("aria-expanded", String(!activePlanCollapsed));
+  activePlanTitle.textContent = plan.title;
+  const doneCount = plan.steps.filter((step) => step.status === "done").length;
+  const progress = Math.round((doneCount / plan.steps.length) * 100);
+  activePlanStepCount.textContent = `${doneCount}/${plan.steps.length}`;
+  activePlanProgressFill.style.width = `${progress}%`;
+
+  const statusSvgs = {
+    done: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`,
+    in_progress: `<svg class="plan-spinner" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="M12 18v4"/><path d="M4.93 4.93 7.76 7.76"/><path d="M16.24 16.24 19.07 19.07"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="M4.93 19.07 7.76 16.24"/><path d="M16.24 7.76 19.07 4.93"/></svg>`,
+    pending: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/></svg>`,
+  };
+
+  activePlanList.innerHTML = plan.steps.map((step, index) => {
+    const status = step.status || "pending";
+    const markerClass = status === "done" ? "done" : status === "in_progress" ? "in-progress" : "pending";
+    const statusLabel = status === "done" ? "Готово" : status === "in_progress" ? "В работе" : "Не сделано";
+    const desc = String(step.description || "").trim();
+    const markerSvg = statusSvgs[status] || statusSvgs.pending;
+    return `
+      <div class="active-plan-step ${markerClass}" style="--step-index: ${index}" type="button" aria-expanded="false">
+        <span class="active-plan-step-marker" aria-hidden="true">${markerSvg}</span>
+        <span class="active-plan-step-text" title="${escapeHtml(statusLabel)}: ${escapeHtml(desc)}">${escapeHtml(desc)}</span>
+      </div>
+    `;
+  }).join("");
+
+  activePlanList.querySelectorAll(".active-plan-step").forEach((stepEl) => {
+    stepEl.addEventListener("click", () => {
+      const expanded = stepEl.classList.toggle("expanded");
+      stepEl.setAttribute("aria-expanded", String(expanded));
+    });
+  });
+}
+
+if (activePlanToggle && activePlanPanel) {
+  activePlanToggle.addEventListener("click", () => {
+    activePlanCollapsed = !activePlanCollapsed;
+    activePlanPanel.classList.toggle("is-collapsed", activePlanCollapsed);
+    activePlanToggle.setAttribute("aria-expanded", String(!activePlanCollapsed));
+  });
+}
+
+async function refreshActivePlan() {
+  try {
+    const response = await fetch("/api/active-plan");
+    const data = await response.json();
+    if (response.ok && data.ok) {
+      renderActivePlan(data.active_plan);
+    }
+  } catch (error) {
+    console.debug("Active plan unavailable", error);
+  }
+}
+
+function renderBackgroundTasks(tasks) {
+  if (!backgroundTaskList || !backgroundTaskCount) {
+    return;
+  }
+  const activeTasks = tasks.filter((task) => task.status === "running");
+  backgroundTaskCount.textContent = String(activeTasks.length);
+  if (!tasks.length) {
+    backgroundTaskList.innerHTML = '<div class="background-task-empty">Нет запущенных задач</div>';
+    return;
+  }
+  backgroundTaskList.innerHTML = tasks.slice(0, 8).map((task) => {
+    const taskId = escapeHtml(task.task_id || "");
+    const status = escapeHtml(task.status || "unknown");
+    const label = escapeHtml(task.label || task.command || "Background task");
+    const command = escapeHtml(task.command || "");
+    const stopButton = task.status === "running"
+      ? `<button class="background-task-stop" type="button" data-stop-background-task="${taskId}">Остановить</button>`
+      : "";
+    return `<div class="background-task">
+      <div class="background-task-top"><span class="background-task-label" title="${command}">${label}</span>${stopButton}</div>
+      <div class="background-task-command" title="${command}">${command}</div>
+      <div class="background-task-meta"><span class="background-task-status ${status}">${status}</span><span>PID ${escapeHtml(task.pid)}</span></div>
+    </div>`;
+  }).join("");
+  backgroundTaskList.querySelectorAll("[data-stop-background-task]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        const response = await fetch("/api/background-tasks/stop", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ task_id: button.dataset.stopBackgroundTask })
+        });
+        if (!response.ok) {
+          throw new Error("Не удалось остановить задачу");
+        }
+        await refreshBackgroundTasks();
+      } catch (error) {
+        button.disabled = false;
+        console.error(error);
+      }
+    });
+  });
+}
+
+async function refreshBackgroundTasks() {
+  try {
+    const response = await fetch("/api/background-tasks");
+    const data = await response.json();
+    if (response.ok && data.ok) {
+      renderBackgroundTasks(Array.isArray(data.tasks) ? data.tasks : []);
+    }
+  } catch (error) {
+    console.debug("Background task status unavailable", error);
   }
 }
 
@@ -2822,15 +4344,34 @@ async function savePresetFromForm(event) {
   loadingStatusText.textContent = "Сохраняю пресет...";
 
   try {
+    const backend = isMacOs ? (presetBackendSelect?.value || "llama-server") : "llama-server";
+    const isMlx = backend === "mlx-vlm";
+    const isMtplx = backend === "mtplx";
+    const isLlama = !isMlx && !isMtplx;
+
+    let port;
+    if (isMlx) {
+      port = Number(presetPortInput?.value || 8080);
+    } else if (isMtplx) {
+      port = Number(presetMtplxPortInput?.value || 8080);
+    } else {
+      port = Number(presetPortInputLlama?.value || 8080);
+    }
+
     const payload = {
       name: presetNameInput?.value?.trim() || "Default",
-      llama_server_path: presetLlamaInput?.value?.trim() || "",
+      backend,
+      llama_server_path: isLlama ? (presetLlamaInput?.value?.trim() || "") : "",
       model_path: presetModelInput?.value?.trim() || "",
-      mmproj_path: presetMmprojInput?.value?.trim() || "",
-      mtp_path: presetMtpInput?.value?.trim() || "",
-      context_size: Number(presetContextInput?.value || 18432),
-      ngl: Number(presetNglInput?.value || 99),
-      port: Number(presetPortInput?.value || 8080),
+      mmproj_path: isLlama ? (presetMmprojInput?.value?.trim() || "") : "",
+      mtp_path: isLlama ? (presetMtpInput?.value?.trim() || "") : "",
+      mtp_enabled: isLlama ? Boolean(presetMtpEnabledInput?.checked) : (isMtplx ? Boolean(presetMtplxMtpEnabledInput?.checked) : false),
+      mtp_n_max: isMtplx ? Number(presetMtplxDepthInput?.value || 3) : 0,
+      context_size: isLlama ? Number(presetContextInput?.value || 18432) : (isMtplx ? Number(presetMtplxContextInput?.value || 32768) : 0),
+      ngl: isLlama ? Number(presetNglInput?.value || 99) : 0,
+      port,
+      temperature: isMlx ? Number(presetTemperatureInput?.value || 0.7) : (isMtplx ? Number(presetMtplxTemperatureInput?.value || 0.6) : 0.7),
+      max_tokens: isMlx ? Number(presetMaxTokensInput?.value || 512) : (isMtplx ? Number(presetMtplxMaxTokensInput?.value || 8192) : 512),
       make_active: true,
     };
 
@@ -2852,7 +4393,7 @@ async function savePresetFromForm(event) {
     renderPresetCards();
     renderToolsList();
     setLoadingMode("launch");
-    loadingStatusText.textContent = "Пресет сохранён. Теперь можно запустить llama-server.";
+    loadingStatusText.textContent = "Пресет сохранён. Теперь можно запустить сервер модели.";
   } catch (error) {
     showSetupError(error.message);
     loadingStatusText.textContent = "Проверьте пути и попробуйте снова.";
@@ -2988,7 +4529,7 @@ async function refreshHealth() {
 
 async function refreshContext() {
   if (!contextIndicator) {
-    return;
+    return null;
   }
 
   try {
@@ -2998,11 +4539,13 @@ async function refreshContext() {
       throw new Error(data.detail || "Context unavailable");
     }
     updateContextIndicator(data);
+    return data;
   } catch {
     contextIndicator.style.setProperty("--context-fill", "0%");
     contextIndicatorText.textContent = "ctx";
     contextIndicator.title = "Контекст недоступен";
     contextIndicator.setAttribute("aria-label", "Контекст недоступен");
+    return null;
   }
 }
 
@@ -3152,7 +4695,7 @@ async function startModelFromLoadingScreen() {
   }
 
   loadingStartBtn.disabled = true;
-  loadingStatusText.textContent = "Запускаю llama-server...";
+  loadingStatusText.textContent = "Запускаю сервер модели...";
 
   try {
     const response = await fetch("/api/server/start", {
@@ -3168,7 +4711,7 @@ async function startModelFromLoadingScreen() {
 
     // Ждём пока сервер действительно поднимется (поллинг)
     loadingStatusText.textContent = "Проверяю сервер...";
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 300; i++) {
       await new Promise(resolve => setTimeout(resolve, 1000));
       const isOnline = await refreshHealth();
       if (isOnline) {
@@ -3197,9 +4740,25 @@ async function readEventStream(response, handlers) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder("utf-8");
   let buffer = "";
+  let lastTokenTs = performance.now();
+
+  function logPerf(event, data) {
+    try {
+      fetch("/api/log_frontend_perf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ts: performance.now(), event, data }),
+        keepalive: true,
+      }).catch(() => {});
+    } catch {
+      // ignore
+    }
+  }
 
   while (true) {
+    const readStart = performance.now();
     const { value, done } = await reader.read();
+    const readMs = performance.now() - readStart;
     if (done) {
       break;
     }
@@ -3220,44 +4779,29 @@ async function readEventStream(response, handlers) {
       const payload = JSON.parse(line.slice(6));
       const handler = handlers[payload.event];
       if (handler) {
+        const handlerStart = performance.now();
         handler(payload);
+        const handlerMs = performance.now() - handlerStart;
+        const now = performance.now();
+        const sinceLastToken = now - lastTokenTs;
+        if (["content_delta", "thinking_delta"].includes(payload.event)) {
+          logPerf("stream_event", {
+            event_type: payload.event,
+            read_ms: Math.round(readMs * 100) / 100,
+            handler_ms: Math.round(handlerMs * 100) / 100,
+            since_last_token_ms: Math.round(sinceLastToken * 100) / 100,
+            delta_len: (payload.delta || "").length,
+            total_len: (payload.content || "").length,
+          });
+          lastTokenTs = now;
+        }
       }
     }
   }
 }
 
-async function sendMessage(event) {
-  event.preventDefault();
-  if (userPromptModal && !userPromptModal.classList.contains("hidden")) {
-    return;
-  }
-  if (isGeneratingResponse) {
-    await requestStopGeneration();
-    return;
-  }
-
-  const message = messageInput.value.trim();
-  const images = [...pendingImages];
-  const isVoiceSubmission = voiceSubmitRequested && !images.length;
-  voiceSubmitRequested = false;
-  if (!message && !images.length) {
-    return;
-  }
-
-  if (!currentChatId) {
-    await createNewChat();
-  }
-
-  addMessage("user", message, { images });
-  await persistCurrentChatState({ immediate: true });
-  messageInput.value = "";
-  autoResizeMessageInput();
-  clearPendingImages();
-  setGeneratingState(true);
-  startLiveStatusTimer("Думает...");
-  if (isVoiceSubmission) {
-    await resetVoiceOverlayState();
-  }
+async function runChatStream(message, images, options = {}) {
+  const { skipUserAppend = false, isVoiceSubmission = false } = options;
 
   const thinkingNode = createMessage("thinking", "");
   let assistantNode = createMessage("assistant", "");
@@ -3300,11 +4844,11 @@ async function sendMessage(event) {
           const state = thinkingStates.get(thinkingNode.thinkingStateId);
           if (state) {
             syncThoughtTimeline(state, payload.content || state.buffer);
-            chatLog.scrollTop = chatLog.scrollHeight;
+            scrollToBottomIfFollowing();
           }
         } else {
           setMessageBody(thinkingNode.bodyNode, payload.content || "");
-          chatLog.scrollTop = chatLog.scrollHeight;
+          scrollToBottomIfFollowing();
         }
       },
       thinking_block: (payload) => {
@@ -3313,15 +4857,17 @@ async function sendMessage(event) {
           if (state) {
             syncThoughtTimeline(state, payload.content || state.buffer);
             completeThoughtTimelineEntry(state);
-            chatLog.scrollTop = chatLog.scrollHeight;
+            scrollToBottomIfFollowing();
           }
         } else {
           setMessageBody(thinkingNode.bodyNode, payload.content || "");
-          chatLog.scrollTop = chatLog.scrollHeight;
+          scrollToBottomIfFollowing();
         }
       },
       content_delta: (payload) => {
         stopLiveStatusTimer();
+        markGenerationProgressGenerating();
+        bumpGenerationProgress(1.5);
         setLiveStatus("Печатает ответ...", true);
         if (thinkingNode.thinkingStateId) {
           const state = thinkingStates.get(thinkingNode.thinkingStateId);
@@ -3335,44 +4881,186 @@ async function sendMessage(event) {
         }
         const node = ensureAssistantNode(payload.content || "");
         setMessageBody(node.bodyNode, payload.content || "", { stream: true });
-        chatLog.scrollTop = chatLog.scrollHeight;
+        scrollToBottomIfFollowing();
+      },
+      prompt_progress: (payload) => {
+        if (typeof payload.percent === "number") {
+          hasRealPromptProgress = true;
+          lastRealPromptProgressAt = Date.now();
+          generationProgressPercent = payload.percent;
+          generationProgressPhase = "thinking";
+          updateGenerationProgressUI();
+          setLiveStatus(`Обработка контекста: ${Math.round(payload.percent)}%`, true);
+        }
+      },
+      decode_progress: (payload) => {
+        if (typeof payload.percent === "number") {
+          hasRealDecodeProgress = true;
+          markGenerationProgressGenerating();
+          generationProgressPercent = payload.percent;
+          updateGenerationProgressUI();
+          setLiveStatus(`Генерация ответа: ${Math.round(payload.percent)}%`, true);
+          if (payload.percent >= 100) {
+            finishGenerationProgress();
+          }
+        }
+      },
+      plan_update: (payload) => {
+        renderActivePlan(payload.plan);
+      },
+      image_progress: (payload) => {
+        const pct = Math.round(payload.percent || 0);
+        setLiveStatus(`Генерация изображения: ${pct}%`, true);
+        updateImageGenPlaceholderProgress(payload.tool_call_id, pct);
+      },
+      tool_call_start: (payload) => {
+        stopLiveStatusTimer();
+        const toolId = payload.tool_call_id;
+        if (!toolId || !thinkingNode.thinkingStateId) {
+          return;
+        }
+        activeStreamingToolCalls.set(toolId, { toolName: payload.tool_name || "", stage: "start" });
+        const state = thinkingStates.get(thinkingNode.thinkingStateId);
+        if (state) {
+          upsertStreamingToolTimelineEntry(state, toolId, payload.tool_name || "", "", "start");
+          scrollToBottomIfFollowing();
+        }
+      },
+      tool_call_delta: (payload) => {
+        const toolId = payload.tool_call_id;
+        if (!toolId || !thinkingNode.thinkingStateId) {
+          return;
+        }
+        activeStreamingToolCalls.set(toolId, { toolName: payload.tool_name || "", stage: "delta" });
+        const state = thinkingStates.get(thinkingNode.thinkingStateId);
+        if (state) {
+          upsertStreamingToolTimelineEntry(state, toolId, payload.tool_name || "", payload.arguments_json || "", "delta");
+          scrollToBottomIfFollowing();
+        }
+      },
+      tool_call_finish: (payload) => {
+        const toolId = payload.tool_call_id;
+        if (!toolId || !thinkingNode.thinkingStateId) {
+          return;
+        }
+        activeStreamingToolCalls.set(toolId, { toolName: payload.tool_name || "", stage: "finish" });
+        const state = thinkingStates.get(thinkingNode.thinkingStateId);
+        if (state) {
+          upsertStreamingToolTimelineEntry(state, toolId, payload.tool_name || "", payload.arguments_json || "", "finish");
+          finalizeStreamingToolTimelineEntry(state, toolId);
+          scrollToBottomIfFollowing();
+        }
+      },
+      tool_call_cancel: (payload) => {
+        const toolId = payload.tool_call_id;
+        if (!toolId || !thinkingNode.thinkingStateId) {
+          return;
+        }
+        activeStreamingToolCalls.delete(toolId);
+        const state = thinkingStates.get(thinkingNode.thinkingStateId);
+        if (state) {
+          cancelStreamingToolTimelineEntry(
+            state,
+            toolId,
+            payload.reason || "Поток вызова инструмента прерван сервером"
+          );
+          scrollToBottomIfFollowing();
+        }
       },
       tool_call: (payload) => {
         stopLiveStatusTimer();
-        setLiveStatus(`Вызов инструмента: ${payload.tool_name}`, true);
+        const statusText = payload.tool_name === "generate_image"
+          ? "Генерация изображения..."
+          : `Вызов инструмента: ${payload.tool_name}`;
+        setLiveStatus(statusText, true);
         if (getAssistantText()) {
           assistantReplyClosed = true;
+        }
+        const iter = payload.iteration ?? 0;
+        const toolId = payload.tool_call_id || `tool-${payload.tool_name}-${iter}`;
+        if (payload.tool_name === "generate_image") {
+          const args = payload.args || {};
+          const node = ensureAssistantNode("");
+          addImageGenPlaceholder(toolId, args.width, args.height, node.article);
         }
         if (thinkingNode.thinkingStateId) {
           const state = thinkingStates.get(thinkingNode.thinkingStateId);
           if (state) {
-            const iter = payload.iteration ?? 0;
-            const toolId = payload.tool_call_id || `tool-${payload.tool_name}-${iter}`;
-            addToolTimelineEntry(state, payload.tool_name, payload.args || {}, toolId);
-            chatLog.scrollTop = chatLog.scrollHeight;
+            promoteStreamingToolToWorking(state, toolId, payload.tool_name, payload.args || {});
+            scrollToBottomIfFollowing();
           }
         }
+        activeStreamingToolCalls.delete(toolId);
       },
       tool_result: (payload) => {
         stopLiveStatusTimer();
         setLiveStatus("Ожидаем следующий шаг агента...", true);
+        const iter = payload.iteration ?? 0;
+        const toolId = payload.tool_call_id || `tool-${payload.tool_name}-${iter}`;
+        if (payload.tool_name === "generate_image") {
+          if (payload.success) {
+            const images = payload.images || [];
+            if (images.length) {
+              resolveImageGenPlaceholder(toolId, images[0]);
+            } else {
+              // Backend reported success but no preview image arrived (file missing or unreadable).
+              removeImageGenPlaceholder(toolId);
+              addMessage("system", `Ошибка генерации изображения: ${payload.error || "файл не создан или недоступен"}`);
+            }
+          } else {
+            removeImageGenPlaceholder(toolId);
+            if (payload.error) {
+              addMessage("system", `Ошибка генерации изображения: ${payload.error}`);
+            }
+          }
+        }
         if (thinkingNode.thinkingStateId) {
           const state = thinkingStates.get(thinkingNode.thinkingStateId);
           if (state) {
-            const iter = payload.iteration ?? 0;
-            const toolId = payload.tool_call_id || `tool-${payload.tool_name}-${iter}`;
             updateToolTimelineEntry(state, toolId, payload.success ? payload.data : payload.error, payload.success, payload.images || []);
-            chatLog.scrollTop = chatLog.scrollHeight;
+            scrollToBottomIfFollowing();
           }
         }
+        activeStreamingToolCalls.delete(toolId);
       },
       status: (payload) => {
         if (payload.message) {
           addMessage("system", payload.message);
         }
       },
+      context_compaction_start: (payload) => {
+        liveStatus?.classList.add("is-compacting");
+        const used = Number(payload.used || 0).toLocaleString("ru-RU");
+        const capacity = Number(payload.capacity || 0).toLocaleString("ru-RU");
+        setLiveStatus(`Сжимаю контекст: ${used} из ${capacity} токенов…`, true);
+        if (liveStatusProgress) {
+          liveStatusProgress.classList.remove("hidden");
+          liveStatusProgress.classList.add("is-indeterminate");
+          liveStatusProgressBar.style.width = "42%";
+          liveStatusProgressText.textContent = "…";
+        }
+      },
+      context_compaction_done: async () => {
+        liveStatus?.classList.remove("is-compacting");
+        if (liveStatusProgress) {
+          liveStatusProgress.classList.remove("is-indeterminate");
+          liveStatusProgress.classList.add("hidden");
+        }
+        setLiveStatus("Контекст сжат, продолжаю задачу…", true);
+        await refreshContext();
+      },
+      context_compaction_error: (payload) => {
+        liveStatus?.classList.remove("is-compacting");
+        if (liveStatusProgress) {
+          liveStatusProgress.classList.remove("is-indeterminate");
+          liveStatusProgress.classList.add("hidden");
+        }
+        setLiveStatus(`Сжатие контекста не выполнено: ${payload.message || "неизвестная ошибка"}`, true);
+      },
       error: (payload) => {
         stopLiveStatusTimer();
+        stopGenerationProgress();
+        clearImageGenPlaceholders();
         const errorMessage = payload.message || "Неизвестная ошибка";
         if (!shouldSuppressSystemErrorMessage(errorMessage)) {
           addMessage("system", `Ошибка: ${errorMessage}`);
@@ -3381,6 +5069,22 @@ async function sendMessage(event) {
       },
       final: (payload) => {
         stopLiveStatusTimer();
+        finishGenerationProgress();
+
+        // Learn real prefill speed from server timings to improve the next
+        // estimated progress bar.
+        const timings = payload.timings || {};
+        let promptSpeed = null;
+        if (typeof timings.prompt_per_second === "number" && timings.prompt_per_second > 0) {
+          promptSpeed = timings.prompt_per_second;
+        } else if (timings.prompt_n && timings.prompt_ms) {
+          promptSpeed = (timings.prompt_n / (timings.prompt_ms / 1000));
+        }
+        if (promptSpeed && isFinite(promptSpeed)) {
+          estimatedPrefillSpeed = Math.max(10, Math.min(2000, promptSpeed));
+          localStorage.setItem("jarvis_estimated_prefill_speed", String(estimatedPrefillSpeed));
+        }
+
         const rawFinalContent = payload.content ?? "";
         const finalText = String(rawFinalContent).trim();
         const currentRawText = String(assistantNode?.bodyNode?.dataset?.rawText || "").trim();
@@ -3421,6 +5125,8 @@ async function sendMessage(event) {
             }
           }
         }
+
+        renderMessageSpeed(assistantNode.article, payload.timings);
       },
       user_prompt: (payload) => {
         setUserPromptModalOpen(true, {
@@ -3428,8 +5134,15 @@ async function sendMessage(event) {
           question: payload.question,
         });
       },
+      user_prompt_close: () => {
+        setUserPromptModalOpen(false);
+      },
+      user_prompt_keepalive: () => {
+        // No-op: the event keeps the SSE stream alive while the modal is open.
+      },
       done: () => {
         stopLiveStatusTimer();
+        clearImageGenPlaceholders();
         if (!assistantNode.bodyNode.textContent.trim() && !assistantReplyClosed) {
           setMessageBody(assistantNode.bodyNode, "(пустой ответ)");
         }
@@ -3460,6 +5173,50 @@ async function sendMessage(event) {
   }
 }
 
+async function sendMessage(event) {
+  event.preventDefault();
+  if (userPromptModal && !userPromptModal.classList.contains("hidden")) {
+    return;
+  }
+  if (isGeneratingResponse) {
+    await requestStopGeneration();
+    return;
+  }
+
+  const message = messageInput.value.trim();
+  const images = [...pendingImages];
+  const isVoiceSubmission = voiceSubmitRequested && !images.length;
+  voiceSubmitRequested = false;
+  if (!message && !images.length) {
+    return;
+  }
+
+  // Проверяем системные разрешения при каждой отправке сообщения
+  runSystemCheck();
+
+  if (!currentChatId) {
+    await createNewChat();
+  }
+
+  // Estimate prompt size so the prefill progress bar can advance even when
+  // llama-server does not stream real slot progress.
+  const contextData = await refreshContext();
+  const estimatedTokens = contextData?.used || 0;
+
+  addMessage("user", message, { images });
+  await persistCurrentChatState({ immediate: true });
+  messageInput.value = "";
+  autoResizeMessageInput();
+  clearPendingImages();
+  setGeneratingState(true, estimatedTokens);
+  startLiveStatusTimer("Обработка контекста...");
+  if (isVoiceSubmission) {
+    await resetVoiceOverlayState();
+  }
+
+  await runChatStream(message, images, { isVoiceSubmission });
+}
+
 // Обработчики для загрузочного экрана (если элементы существуют)
 if (loadingModelSelect && loadingModelDescription) {
   loadingModelSelect.addEventListener("change", async () => {
@@ -3479,6 +5236,32 @@ if (loadingAsrSelect && loadingAsrDescription) {
     updateAsrDescription(loadingAsrSelect, loadingAsrDescription);
   });
 }
+if (presetBackendSelect) {
+  presetBackendSelect.addEventListener("change", updatePresetFormVisibility);
+}
+if (presetScanModelsBtn) {
+  presetScanModelsBtn.addEventListener("click", () => {
+    loadLocalModels();
+  });
+}
+if (presetLocalModelsSelect) {
+  presetLocalModelsSelect.addEventListener("change", () => {
+    if (presetLocalModelsSelect.value && presetModelInput) {
+      presetModelInput.value = presetLocalModelsSelect.value;
+    }
+  });
+}
+if (presetDownloadBtn) {
+  presetDownloadBtn.addEventListener("click", () => {
+    const repoId = presetHfRepoInput?.value?.trim();
+    if (!repoId) {
+      showSetupError("Введите repo_id модели с HuggingFace.");
+      return;
+    }
+    showSetupError("");
+    startModelDownload(repoId);
+  });
+}
 if (loadingStartBtn) {
   loadingStartBtn.addEventListener("click", startModelFromLoadingScreen);
 }
@@ -3488,6 +5271,13 @@ if (presetSetupForm) {
 if (presetAddBtn) {
   presetAddBtn.addEventListener("click", () => {
     showSetupError("");
+    stopDownload();
+    if (presetBackendSelect && isMacOs) {
+      presetBackendSelect.value = "mlx-vlm";
+    } else if (presetBackendSelect) {
+      presetBackendSelect.value = "llama-server";
+    }
+    updatePresetFormVisibility();
     setLoadingMode("setup");
     loadingStatusText.textContent = "Создайте новый пресет.";
   });
@@ -3495,16 +5285,40 @@ if (presetAddBtn) {
 if (presetSetupBackBtn) {
   presetSetupBackBtn.addEventListener("click", () => {
     showSetupError("");
+    stopDownload();
     if (configCache?.needs_setup) {
       loadingStatusText.textContent = "Сначала создайте хотя бы один пресет.";
       return;
     }
     setLoadingMode("launch");
-    loadingStatusText.textContent = "Выберите пресет и запустите llama-server.";
+    loadingStatusText.textContent = "Выберите пресет и запустите сервер модели.";
   });
 }
 
 chatForm.addEventListener("submit", sendMessage);
+if (voiceMessageBtn) {
+  voiceMessageBtn.addEventListener("click", toggleVoiceMessageRecording);
+}
+if (voskDownloadBtn) {
+  voskDownloadBtn.addEventListener("click", async () => {
+    voskDownloadBtn.disabled = true;
+    if (voskDownloadStatus) voskDownloadStatus.textContent = "Скачивание…";
+    try {
+      const response = await fetch("/api/voice/download_model", { method: "POST" });
+      const data = await response.json();
+      if (response.ok && data.ok) {
+        if (voskDownloadStatus) voskDownloadStatus.textContent = "Готово!";
+        if (voskDownloadBanner) voskDownloadBanner.classList.add("hidden");
+      } else {
+        throw new Error(data.detail || "Ошибка скачивания");
+      }
+    } catch (err) {
+      if (voskDownloadStatus) voskDownloadStatus.textContent = `Ошибка: ${err.message}`;
+    } finally {
+      voskDownloadBtn.disabled = false;
+    }
+  });
+}
 if (newChatBtn) {
   newChatBtn.addEventListener("click", async () => {
     try {
@@ -3525,6 +5339,8 @@ if (chatList) {
           await renameChat(chatId);
         } else if (action === "delete") {
           await deleteChat(chatId);
+        } else if (action === "summarize") {
+          await summarizeChat(chatId);
         }
       } catch (error) {
         addMessage("system", `Ошибка действия с чатом: ${error.message}`);
@@ -3553,6 +5369,7 @@ if (chatList) {
   });
 }
 document.addEventListener("click", (event) => {
+  // Timeline rows are always expanded; no toggle behaviour needed.
   if (!event.target.closest(".chat-menu-wrap")) {
     if (openChatMenuId !== null) {
       openChatMenuId = null;
@@ -3808,6 +5625,8 @@ async function initApp() {
   try {
     const status = await loadConfigStatus();
     fillPresetSetupDefaults(status);
+    updatePresetFormVisibility();
+    loadLocalModels();
 
     if (status.needs_setup) {
       loadingScreen?.classList.remove("hidden");
@@ -3818,14 +5637,19 @@ async function initApp() {
     }
 
     await loadModels();
-    await loadAsrBackends();
-    await loadChats();
-    await pollVoiceState();
-    await loadToolsCatalog();
-    await refreshTelegramAccountStatus();
+      await loadAsrBackends();
+      await loadChats();
+      await pollVoiceState();
+      await loadToolsCatalog();
+      await refreshBackgroundTasks();
+      await refreshActivePlan();
+      await refreshTelegramAccountStatus();
     renderPresetCards();
     renderToolsList();
     setLoadingMode("launch");
+
+    // Check for updates from GitHub after the UI is ready.
+    checkForUpdate();
 
     const isOnline = await refreshHealth();
 
@@ -3840,9 +5664,11 @@ async function initApp() {
       await refreshContext();
       setLiveStatus("Готов к работе", false);
       syncEmptyChatState();
+      runSystemCheck();
     } else {
       loadingScreen?.classList.remove("hidden");
       document.querySelector(".shell")?.classList.add("hidden");
+      runSystemCheck();
       loadingStatusText.textContent = "Выберите пресет и запустите llama-server.";
     }
   } catch (error) {
@@ -3853,6 +5679,9 @@ async function initApp() {
   }
 }
 
+initStreamFollow();
 initApp();
 setInterval(pollVoiceState, 250);
 setInterval(renderChatList, 60000);
+setInterval(refreshBackgroundTasks, 2000);
+setInterval(refreshActivePlan, 2000);

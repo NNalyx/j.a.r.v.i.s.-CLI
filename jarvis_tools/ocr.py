@@ -8,7 +8,7 @@ from jarvis_core.colors import Colors
 from jarvis_core.constants import FUZZY_AVAILABLE, OCR_AVAILABLE, easyocr
 from jarvis_core.types import ToolResult
 
-from .utils import _calculate_ocr_text_similarity, _map_bbox_to_screen_coordinates
+from .utils import _calculate_ocr_text_similarity, _map_bbox_to_screen_coordinates, _take_region_screenshot
 
 
 def click_text(text: str, screenshot_path: Optional[str] = None, threshold: float = 0.8) -> ToolResult:
@@ -25,10 +25,10 @@ def click_text(text: str, screenshot_path: Optional[str] = None, threshold: floa
         threshold: Порог fuzzy-поиска (0-1)
     """
     if not OCR_AVAILABLE:
-        return ToolResult(False, None, "EasyOCR не установлен. Установите: pip install easyocr")
+        return ToolResult(False, None, "EasyOCR is not installed. Install it with: pip install easyocr")
 
     if not FUZZY_AVAILABLE:
-        return ToolResult(False, None, "fuzzywuzzy не установлен. Установите: pip install fuzzywuzzy")
+        return ToolResult(False, None, "fuzzywuzzy is not installed. Install it with: pip install fuzzywuzzy")
 
     try:
         import pyautogui
@@ -37,9 +37,32 @@ def click_text(text: str, screenshot_path: Optional[str] = None, threshold: floa
 
         # Инициализируем OCR reader если нужно (ленивая загрузка)
         if _state._ocr_reader is None:
-            print(f"{Colors.CYAN}[OCR] Инициализация EasyOCR (русский + английский)...{Colors.RESET}")
-            _state._ocr_reader = easyocr.Reader(['ru', 'en'], gpu=False, verbose=False)
-            print(f"{Colors.GREEN}[OCR] Готово{Colors.RESET}")
+            try:
+                import ssl as _ssl_mod
+                print(f"{Colors.CYAN}[OCR] Инициализация EasyOCR (русский + английский)...{Colors.RESET}")
+                # Пробуем использовать certifi для SSL-сертификатов
+                try:
+                    import certifi
+                    context = _ssl_mod.create_default_context(cafile=certifi.where())
+                    _state._ocr_reader = easyocr.Reader(
+                        ['ru', 'en'], gpu=False, verbose=False,
+                        download_enabled=True, model_storage_directory=None,
+                        user_network_directory=None
+                    )
+                except Exception:
+                    # Fallback — стандартная инициализация без явного контекста SSL
+                    _state._ocr_reader = easyocr.Reader(['ru', 'en'], gpu=False, verbose=False)
+                print(f"{Colors.GREEN}[OCR] Готово{Colors.RESET}")
+            except _ssl_mod.SSLError as e:
+                return ToolResult(
+                    False, None,
+                    f"SSL-сертификаты не найдены. Установите сертификаты Python:\n"
+                    f"  open /Applications/Python\\ 3.12/Install\\ Certificates.command\n"
+                    f"Или запустите: venv/bin/python -m pip install --upgrade certifi && "
+                    f"/Applications/Python\\ 3.12/Install\\ Certificates.command"
+                )
+            except Exception as e:
+                return ToolResult(False, None, f"Ошибка инициализации EasyOCR: {str(e)}")
 
         # Используем последний скриншот если путь не указан
         if screenshot_path is None:
@@ -52,22 +75,25 @@ def click_text(text: str, screenshot_path: Optional[str] = None, threshold: floa
         # Если нет сохранённого скриншота или файл не существует — делаем новый
         if screenshot_path is None or not os.path.exists(screenshot_path):
             print(f"{Colors.CYAN}[OCR] Нет сохранённого скриншота, делаю новый...{Colors.RESET}")
-            screenshot = ImageGrab.grab()
-            screenshot_path = os.path.join(tempfile.gettempdir(), f"screenshot_ocr_{int(time.time())}.png")
-            screenshot.save(screenshot_path, "PNG")
-            screenshot_meta = {
-                "path": screenshot_path,
-                "scale_factor": 1.0,
-                "orig_width": screenshot.width,
-                "orig_height": screenshot.height,
-                "scaled_width": screenshot.width,
-                "scaled_height": screenshot.height,
-                "offset_x": 0,
-                "offset_y": 0,
-                "region": None,
-            }
-            _state._last_screenshot_path = screenshot_path
-            _state._last_screenshot_meta = dict(screenshot_meta)
+            try:
+                screenshot = ImageGrab.grab()
+                screenshot_path = os.path.join(tempfile.gettempdir(), f"screenshot_ocr_{int(time.time())}.png")
+                screenshot.save(screenshot_path, "PNG")
+                screenshot_meta = {
+                    "path": screenshot_path,
+                    "scale_factor": 1.0,
+                    "orig_width": screenshot.width,
+                    "orig_height": screenshot.height,
+                    "scaled_width": screenshot.width,
+                    "scaled_height": screenshot.height,
+                    "offset_x": 0,
+                    "offset_y": 0,
+                    "region": None,
+                }
+                _state._last_screenshot_path = screenshot_path
+                _state._last_screenshot_meta = dict(screenshot_meta)
+            except Exception:
+                screenshot_path, screenshot_meta, _ = _take_region_screenshot(region=None)
         else:
             print(f"{Colors.CYAN}[OCR] Использую последний скриншот: {screenshot_path}{Colors.RESET}")
             if screenshot_meta is None:
@@ -82,7 +108,7 @@ def click_text(text: str, screenshot_path: Optional[str] = None, threshold: floa
         results = _state._ocr_reader.readtext(screenshot_path)
 
         if not results:
-            return ToolResult(False, None, "Текст не найден на скриншоте")
+            return ToolResult(False, None, "No text found on screenshot")
 
         candidates = []
         for bbox, detected_text, confidence in results:
@@ -118,9 +144,9 @@ def click_text(text: str, screenshot_path: Optional[str] = None, threshold: floa
             return ToolResult(
                 False,
                 None,
-                f"Текст '{text}' не найден с threshold={threshold:.2f}"
+                f"Text '{text}' not found with threshold={threshold:.2f}"
                 + (
-                    f" (лучшее совпадение: '{best_alternative['detected_text']}' "
+                    f" (best match: '{best_alternative['detected_text']}' "
                     f"sim={best_alternative['similarity']:.3f}, ocr={best_alternative['ocr_confidence']:.3f})"
                     if best_alternative else ""
                 )
@@ -149,4 +175,3 @@ def click_text(text: str, screenshot_path: Optional[str] = None, threshold: floa
         return ToolResult(False, None, f"Import error: {str(e)}")
     except Exception as e:
         return ToolResult(False, None, f"click_text error: {str(e)}")
-
