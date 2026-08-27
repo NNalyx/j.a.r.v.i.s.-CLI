@@ -1,7 +1,7 @@
 # Jarvis Desktop
 <img width="868" height="432" alt="image" src="https://github.com/user-attachments/assets/ee8ee82f-47b0-4d70-a633-ffc71bdfea4f" />
 
-Локальный голосовой ассистент для Windows с веб-интерфейсом. Работает поверх `llama-server` и умеет читать экран, управлять окнами, запускать команды, распознавать речь и озвучивать ответы.
+Локальный голосовой ассистент для **Windows и macOS** с веб-интерфейсом. Работает поверх `llama-server` и умеет читать экран, управлять окнами, запускать команды, распознавать речь и озвучивать ответы. Поддерживает Apple Silicon (M1/M1X/M2/M3) через MLX-оптимизации.
 
 > ⚠️ **Статус: альфа.** Проект создавался как личный помощник. Перед использованием внимательно прочитайте раздел [Безопасность](#безопасность).
 
@@ -19,6 +19,9 @@
 - 🔊 TTS-озвучка ответов
 - 🖼️ Мультимодальность (vision) через mmproj-модели
 - 🖥️ Инструменты: скриншоты, OCR, управление окнами, запуск команд/Python-скриптов
+- ✏️ Inline-редактирование сообщений прямо в чате
+- 🎨 Переработанный UI: прямоугольные сообщения, кнопки «Скопировать / Изменить», плавная прокрутка пресетов
+- 🔄 Автообновление: проверка новых версий на GitHub и one-click обновление прямо из приложения
 - 💾 Персистентность чатов и настроек
 - ✈️ Telegram-бот (опционально)
 - 👤 Управление личным Telegram-аккаунтом через Telethon: чаты, непрочитанные сообщения, отправка сообщений, вступление в группы, глобальный поиск
@@ -27,31 +30,35 @@
 
 ## Требования
 
-- Windows 10/11
+- **Windows:** Windows 10/11, NVIDIA GPU с CUDA (рекомендуется, но не обязательно)
+- **macOS:** macOS 12+, Intel или Apple Silicon (M1/M1X/M2/M3). На Apple Silicon доступно ускорение через MLX
 - Python 3.10+
-- NVIDIA GPU с CUDA (рекомендуется, но не обязательно)
-- Скомпилированный `llama-server.exe` из [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp)
+- Скомпилированный `llama-server` для вашей платформы из [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp)
 - Модели Vosk (для голоса):
   - [vosk-model-small-ru-0.22](https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip)
   - [vosk-model-ru-0.42](https://alphacephei.com/vosk/models/vosk-model-ru-0.42.zip) (опционально, для лучшего качества)
 
 ## Установка
 
-```powershell
+```bash
 # 1. Клонируйте репозиторий
 git clone https://github.com/NNalyx/j.a.r.v.i.s.-CLI.git
 cd j.a.r.v.i.s.-CLI
-cd jarvis
 
 # 2. Создайте виртуальное окружение
 python -m venv .venv
-.venv\Scripts\activate
 
-# 3. Установите зависимости
+# 3. Активируйте окружение
+# Windows:
+.venv\Scripts\activate
+# macOS:
+source .venv/bin/activate
+
+# 4. Установите зависимости
 pip install -r requirements.txt
 
-# 4. Скачайте модели Vosk и распакуйте, например в папку models\
-#    jarvis/
+# 5. Скачайте модели Vosk и распакуйте, например в папку models/
+#    j.a.r.v.i.s.-CLI/
 #    ├── models/
 #    │   ├── vosk-model-small-ru-0.22/
 #    │   └── vosk-model-ru-0.42/
@@ -60,22 +67,35 @@ pip install -r requirements.txt
 
 ## Настройка
 
-1. Поместите `llama-server.exe` в удобное место, например `C:\llama-server\`.
+1. Поместите бинарник `llama-server` (Windows: `llama-server.exe`, macOS: `llama-server`) в удобное место, например `C:\llama-server\` или `~/llama-server/`.
 2. Поместите GGUF-модели в ту же папку или укажите пути в интерфейсе.
-3. При первом запуске откроется мастер настройки пресетов — укажите путь к `llama-server.exe`, модели и опциональный `mmproj`.
+3. При первом запуске откроется мастер настройки пресетов — укажите путь к `llama-server`, модели и опциональный `mmproj`.
 4. (Опционально) Для Telegram-бота введите токен через интерфейс. Токен хранится в `jarvis_telegram_secret.json`.
 5. (Опционально) Для управления личным Telegram-аккаунтом подключите аккаунт в разделе **Настройки → Telegram-аккаунт**. Учётные данные и сессия хранятся в `jarvis_telegram_account_secret.json` и не попадают в основной конфиг.
 <img width="2552" height="1377" alt="image" src="https://github.com/user-attachments/assets/1dd5ef21-f6f5-47f3-93c4-2f19dfaebdb0" />
 
 ## Запуск
 
+**Windows:**
 ```powershell
 .venv\Scripts\activate
 python jarvis_web_desktop.py
 ```
 
+**macOS:**
+```bash
+source .venv/bin/activate
+python jarvis_web_desktop.py
+```
+
 Приложение откроет окно pywebview и поднимет локальный FastAPI-сервер на `http://127.0.0.1:8765`.
 <img width="1415" height="948" alt="image" src="https://github.com/user-attachments/assets/03150bff-fd75-458d-8c09-b9337f8d7caf" />
+
+## Автообновление
+
+Приложение умеет проверять наличие новой версии на GitHub. Если на `origin/main` есть изменения, в интерфейсе появится плашка с предложением обновиться. После подтверждения выполняется `git pull` и приложение автоматически перезапускается.
+
+> Требование: репозиторий должен быть клонирован через `git clone`, а не скачан как ZIP-архив.
 
 ## Безопасность
 
@@ -99,9 +119,11 @@ jarvis/
 ├── jarvis_agent/           # ядро агента и CLI/GUI приложение
 ├── jarvis_voice.py         # голосовая активация (Vosk)
 ├── jarvis_telegram.py      # Telegram-интеграция
+├── jarvis_mlx/             # MLX-оптимизации для Apple Silicon
 ├── config_manager.py       # пресеты и настройки
 ├── app.js / app.css        # фронтенд
-└── index.html              # UI
+├── index.html              # UI
+└── updater.py              # вспомогательный скрипт для автообновления
 ```
 
 ## Лицензия
