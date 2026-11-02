@@ -15,6 +15,7 @@ from .utils import (
     _read_text_file_lines,
     _strip_read_code_line_numbers,
 )
+from .change_tracking import capture_before_write
 
 
 def search_text_in_file(path: str, query: Any, threshold: float = 0.6,
@@ -113,6 +114,7 @@ def write_file(path: str, content: str) -> ToolResult:
                                   f"Permission denied: {dir_path}. Avoid non-ASCII characters in paths. Your user is: {_user}. Use '{_home}' as base path.")
             except Exception as e:
                 return ToolResult(False, None, f"Directory creation error: {str(e)}")
+        capture_before_write(path)
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
         return ToolResult(True, {"path": path, "bytes_written": len(content)})
@@ -651,6 +653,7 @@ def edit_code(path: str, line: Optional[int] = None, new_code: str = "", mode: s
                               f"Unknown mode: {mode}. Available: replace, insert_before, insert_after, delete")
 
         # Записываем обратно
+        capture_before_write(path)
         with open(path, "w", encoding=used_encoding) as f:
             f.writelines(lines)
 

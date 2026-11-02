@@ -36,12 +36,14 @@ from .uia import do_action_in_app, get_app_context
 from .user_prompt import ask_user
 from .wait import wait
 from .web import read_url, search_web
+from .find_person import find_person
 
 
 class Tools:
     """Набор инструментов для агента (обратная совместимость)."""
 
     search_web = staticmethod(search_web)
+    find_person = staticmethod(find_person)
     read_url = staticmethod(read_url)
     run_cmd = staticmethod(run_cmd)
     run_python = staticmethod(run_python)

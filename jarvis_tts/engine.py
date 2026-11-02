@@ -95,6 +95,9 @@ def _init_supertonic():
         return False
 
     try:
+        # Supertonic использует ONNX Runtime. На текущем macOS-окружении
+        # доступен только CPUExecutionProvider (MPS для ONNX Runtime не
+        # предоставляется), поэтому фиксируем это честно в статусе UI.
         _state._tts_device = "cpu"
 
         # Подавляем весь вывод при загрузке модели
@@ -174,6 +177,10 @@ def speak_now(text, ref_audio_path=None, ref_text=None, speed=1.0, volume=1.0,
             synth_kwargs = {
                 "text": text,
                 "lang": _detect_tts_language(text),
+                # Меньше итераций заметно сокращает задержку старта речи,
+                # сохраняя нормальное качество для коротких ответов.
+                "total_steps": 6,
+                "speed": max(1.05, min(1.25, float(speed))),
             }
             if _state._tts_voice_style is not None:
                 synth_kwargs["voice_style"] = _state._tts_voice_style

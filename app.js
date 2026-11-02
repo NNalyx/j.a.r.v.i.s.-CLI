@@ -26,6 +26,7 @@ const presetBackendWrap = document.getElementById("preset-backend-wrap");
 const presetBackendSelect = document.getElementById("preset-backend-select");
 const presetLlamaFields = document.getElementById("preset-llama-fields");
 const presetLlamaInput = document.getElementById("preset-llama-input");
+const presetLlamaSelect = document.getElementById("preset-llama-select");
 const presetLlamaHint = document.getElementById("preset-llama-hint");
 const presetModelInput = document.getElementById("preset-model-input");
 const presetScanModelsBtn = document.getElementById("preset-scan-models-btn");
@@ -68,6 +69,17 @@ const loadingAsrSelect = document.getElementById("loading-asr-select");
 const loadingAsrDescription = document.getElementById("loading-asr-description");
 const loadingStartBtn = document.getElementById("loading-start-btn");
 const loadingStatusText = document.getElementById("loading-status-text");
+const startupSubtitle = document.getElementById("startup-subtitle");
+const modelBootScreen = document.getElementById("model-boot-screen");
+const modelBootTitle = document.getElementById("model-boot-title");
+const modelBootMessage = document.getElementById("model-boot-message");
+const modelBootSteps = document.getElementById("model-boot-steps");
+const modelBootError = document.getElementById("model-boot-error");
+const modelBootErrorMessage = document.getElementById("model-boot-error-message");
+const modelBootErrorDetails = document.getElementById("model-boot-error-details");
+const modelBootErrorLog = document.getElementById("model-boot-error-log");
+const modelBootRetryBtn = document.getElementById("model-boot-retry");
+const modelBootBackBtn = document.getElementById("model-boot-back");
 
 // === Элементы основного интерфейса ===
 const ttsToggle = document.getElementById("tts-toggle");
@@ -83,12 +95,97 @@ const messageInput = document.getElementById("message-input");
 const pastePreview = document.getElementById("paste-preview");
 const sendBtn = document.getElementById("send-btn");
 const voiceMessageBtn = document.getElementById("voice-message-btn");
+const executionTargetSelect = document.getElementById("execution-target-select");
+const executionTargetStatus = document.getElementById("execution-target-status");
+const remotePairStartBtn = document.getElementById("remote-pair-start-btn");
+const remotePairCodeWrap = document.getElementById("remote-pair-code-wrap");
+const remotePairAddress = document.getElementById("remote-pair-address");
+const remotePairCode = document.getElementById("remote-pair-code");
+const remotePairCountdown = document.getElementById("remote-pair-countdown");
+const remotePairConnectForm = document.getElementById("remote-pair-connect-form");
+const remotePairHostInput = document.getElementById("remote-pair-host");
+const remotePairCodeInput = document.getElementById("remote-pair-code-input");
+const remotePairConnectBtn = document.getElementById("remote-pair-connect-btn");
+const remoteDeviceStatus = document.getElementById("remote-device-status");
+const remotePairDisconnectBtn = document.getElementById("remote-pair-disconnect-btn");
+const voiceRecordingStatus = document.getElementById("voice-recording-status");
+const voiceRecordingLabel = document.getElementById("voice-recording-label");
+const voiceRecordingTranscript = document.getElementById("voice-recording-transcript");
+const voiceRecordingMeter = document.getElementById("voice-recording-meter");
+const voiceRecordingTimer = document.getElementById("voice-recording-timer");
+const voiceOverlayMeter = document.getElementById("voice-overlay-meter");
 const voskDownloadBanner = document.getElementById("vosk-download-banner");
 const voskDownloadBtn = document.getElementById("vosk-download-btn");
 const voskDownloadStatus = document.getElementById("vosk-download-status");
 const contextIndicator = document.getElementById("context-indicator");
 const contextIndicatorText = document.getElementById("context-indicator-text");
 const chatLog = document.getElementById("chat-log");
+let activeChangeReview = null;
+let selectedChangeIndex = 0;
+
+function showChangeReview(changes) {
+  if (!changes?.files?.length) return;
+  activeChangeReview = changes;
+  selectedChangeIndex = 0;
+  const drawer = document.getElementById("changes-drawer");
+  const backdrop = document.getElementById("changes-backdrop");
+  drawer?.classList.remove("hidden");
+  backdrop?.classList.remove("hidden");
+  drawer?.setAttribute("aria-hidden", "false");
+  renderChangeReview();
+}
+
+function renderChangeReview() {
+  if (!activeChangeReview) return;
+  const list = document.getElementById("changes-file-list");
+  const diff = document.getElementById("changes-diff");
+  const status = document.getElementById("changes-status");
+  const rollback = document.getElementById("changes-rollback-btn");
+  list.replaceChildren();
+  activeChangeReview.files.forEach((file, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `changes-file${index === selectedChangeIndex ? " active" : ""}`;
+    button.textContent = file.path.split(/[\\/]/).pop() + (file.created ? " · новый" : "");
+    button.title = file.path;
+    button.addEventListener("click", () => { selectedChangeIndex = index; renderChangeReview(); });
+    list.appendChild(button);
+  });
+  const file = activeChangeReview.files[selectedChangeIndex];
+  diff.textContent = file?.diff || "Изменений не найдено";
+  status.textContent = file?.path || "";
+  rollback.disabled = !file || file.rollback_available === false;
+}
+
+function closeChangeReview() {
+  document.getElementById("changes-drawer")?.classList.add("hidden");
+  document.getElementById("changes-backdrop")?.classList.add("hidden");
+  document.getElementById("changes-drawer")?.setAttribute("aria-hidden", "true");
+}
+
+document.getElementById("changes-close-btn")?.addEventListener("click", closeChangeReview);
+document.getElementById("changes-backdrop")?.addEventListener("click", closeChangeReview);
+document.getElementById("changes-rollback-btn")?.addEventListener("click", async () => {
+  const file = activeChangeReview?.files?.[selectedChangeIndex];
+  if (!file || !activeChangeReview?.id) return;
+  const button = document.getElementById("changes-rollback-btn");
+  const status = document.getElementById("changes-status");
+  button.disabled = true;
+  try {
+    const response = await fetch(executionTargetSelect?.value === "remote" ? "/api/remote/changes/rollback" : "/api/changes/rollback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: activeChangeReview.id, path: file.path }) });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "Не удалось откатить файл");
+    file.rollback_available = false;
+    file.diff = `${file.path}\n\nИзменения отменены.`;
+    status.textContent = data.message || "Изменение отменено";
+    renderChangeReview();
+    status.textContent = data.message || "Изменение отменено";
+  } catch (error) {
+    status.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
 const template = document.getElementById("message-template");
 const liveStatus = document.getElementById("live-status");
 const liveStatusText = document.getElementById("live-status-text");
@@ -106,6 +203,19 @@ const settingsToggleBtn = document.getElementById("settings-toggle-btn");
 const settingsCloseBtn = document.getElementById("settings-close-btn");
 const settingsDrawer = document.getElementById("settings-drawer");
 const settingsBackdrop = document.getElementById("settings-backdrop");
+
+// System prompt profiles
+const systemPromptList = document.getElementById("system-prompt-list");
+const systemPromptHint = document.getElementById("system-prompt-hint");
+const systemPromptAddBtn = document.getElementById("system-prompt-add-btn");
+const systemPromptModal = document.getElementById("system-prompt-modal");
+const systemPromptModalTitle = document.getElementById("system-prompt-modal-title");
+const systemPromptModalCloseBtn = document.getElementById("system-prompt-modal-close-btn");
+const systemPromptForm = document.getElementById("system-prompt-form");
+const systemPromptNameInput = document.getElementById("system-prompt-name");
+const systemPromptContentInput = document.getElementById("system-prompt-content");
+const systemPromptError = document.getElementById("system-prompt-error");
+const systemPromptCancelBtn = document.getElementById("system-prompt-cancel-btn");
 
 // Telegram account settings
 const telegramAccountStatus = document.getElementById("telegram-account-status");
@@ -191,6 +301,8 @@ let contextRefreshInFlight = false;
 let isGeneratingResponse = false;
 let stopRequestInFlight = false;
 let isRecordingVoiceMessage = false;
+let voiceMessageStopInFlight = false;
+let voiceMessageStartedAt = 0;
 let isMacOs = false;
 let downloadEventSource = null;
 let localModelsCache = [];
@@ -295,6 +407,7 @@ function setSendButtonMode(mode) {
 
 function setGeneratingState(nextState, estimatedTokens = 0) {
   isGeneratingResponse = Boolean(nextState);
+  document.body.classList.toggle("remote-working", isGeneratingResponse && executionTargetSelect?.value === "remote");
   if (!isGeneratingResponse) {
     liveStatus?.classList.remove("is-compacting");
     liveStatusProgress?.classList.remove("is-indeterminate");
@@ -303,7 +416,7 @@ function setGeneratingState(nextState, estimatedTokens = 0) {
     stopContextRefreshTimer();
   } else {
     startGenerationProgress(estimatedTokens);
-    startContextRefreshTimer();
+    if (executionTargetSelect?.value !== "remote") startContextRefreshTimer();
   }
   setSendButtonMode(isGeneratingResponse ? "stop" : "send");
 }
@@ -431,7 +544,7 @@ async function requestStopGeneration() {
   setLiveStatus("Останавливаю ответ...", true);
 
   try {
-    await fetch("/api/chat/stop", { method: "POST" });
+    await fetch(executionTargetSelect?.value === "remote" ? "/api/remote/chat/stop" : "/api/chat/stop", { method: "POST" });
   } catch (error) {
     stopRequestInFlight = false;
     addMessage("system", `Не удалось остановить ответ: ${error.message}`);
@@ -497,7 +610,7 @@ async function submitUserPrompt(answer) {
     return;
   }
   try {
-    await fetch("/api/user-response", {
+    await fetch(executionTargetSelect?.value === "remote" ? "/api/remote/user-response" : "/api/user-response", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt_id: activeUserPromptId, answer }),
@@ -731,9 +844,21 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-function handleSystemCheckFix(issue) {
-  if (issue.fix_action === "open_url" && issue.fix_url) {
-    window.open(issue.fix_url, "_blank");
+async function handleSystemCheckFix(issue) {
+  if (issue.fix_action === "open_url" || issue.id === "hf_token_missing") {
+    try {
+      const response = await fetch("/api/system-check/fix", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ issue_id: issue.id }),
+      });
+      if (!response.ok) throw new Error("Не удалось открыть настройки");
+      // После возврата из настроек перепроверяем разрешения.
+      window.setTimeout(runSystemCheck, 1500);
+    } catch (error) {
+      // Запасной вариант для браузерного режима.
+      if (issue.fix_url) window.open(issue.fix_url, "_blank");
+    }
   } else if (issue.fix_action === "open_presets") {
     loadingScreen?.classList.remove("hidden");
     document.querySelector(".shell")?.classList.add("hidden");
@@ -816,6 +941,67 @@ if (updateNowBtn) {
   updateNowBtn.addEventListener("click", applyUpdate);
 }
 
+async function checkLlamaServerUpdate() {
+  const statusNode = document.getElementById("llama-update-status");
+  const checkButton = document.getElementById("llama-update-check-btn");
+  const installButton = document.getElementById("llama-update-apply-btn");
+  if (!statusNode) return;
+  if (checkButton) {
+    checkButton.disabled = true;
+    checkButton.textContent = "Проверяю…";
+  }
+  statusNode.textContent = "Сверяю установленный llama-server с официальными сборками GitHub…";
+  try {
+    const response = await fetch("/api/llama/update/check", { cache: "no-store" });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.detail || "Проверка не удалась");
+    if (data.available) {
+      statusNode.textContent = `Доступна ${data.latest_version}; сейчас ${data.current_version}. Устанавливать её можно вручную.`;
+      installButton?.classList.remove("hidden");
+      if (installButton) installButton.disabled = false;
+    } else {
+      const currentBuild = Number(data.current_build || 0);
+      const latestBuild = Number(data.latest_build || 0);
+      statusNode.textContent = currentBuild > latestBuild
+        ? `Установлена ${data.current_version}; новее готового официального пакета для Mac пока нет (${data.latest_version}).`
+        : `Установлена актуальная сборка ${data.current_version}.`;
+      installButton?.classList.add("hidden");
+    }
+  } catch (error) {
+    statusNode.textContent = error.message || "Не удалось проверить сборки llama.cpp.";
+    installButton?.classList.add("hidden");
+  } finally {
+    if (checkButton) {
+      checkButton.disabled = false;
+      checkButton.textContent = "Проверить сборку";
+    }
+  }
+}
+
+async function installLlamaServerUpdate() {
+  const statusNode = document.getElementById("llama-update-status");
+  const installButton = document.getElementById("llama-update-apply-btn");
+  if (!statusNode || !installButton) return;
+  installButton.disabled = true;
+  installButton.textContent = "Устанавливаю…";
+  statusNode.textContent = "Загружаю официальный пакет и сверяю версию бинарника…";
+  try {
+    const response = await fetch("/api/llama/update/apply", { method: "POST" });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.detail || "Установка не удалась");
+    statusNode.textContent = data.message || `${data.latest_version} установлена. Перезапустите JARVIS.`;
+    installButton.classList.add("hidden");
+  } catch (error) {
+    statusNode.textContent = error.message || "Не удалось установить сборку llama.cpp.";
+    installButton.disabled = false;
+  } finally {
+    installButton.textContent = "Установить";
+  }
+}
+
+document.getElementById("llama-update-check-btn")?.addEventListener("click", checkLlamaServerUpdate);
+document.getElementById("llama-update-apply-btn")?.addEventListener("click", installLlamaServerUpdate);
+
 function updateVoiceOverlay(state) {
   if (!voiceOverlay || !voiceOverlayStatus || !voiceOverlayTranscript) {
     return;
@@ -864,8 +1050,11 @@ async function toggleVoiceMessageRecording() {
   }
 
   if (isRecordingVoiceMessage) {
+    voiceMessageStopInFlight = true;
     voiceMessageBtn.disabled = true;
     voiceMessageBtn.setAttribute("aria-label", "Расшифровываю запись...");
+    voiceRecordingStatus?.classList.add("is-transcribing");
+    if (voiceRecordingLabel) voiceRecordingLabel.textContent = "Расшифровываю запись…";
     setLiveStatus("📝 Расшифровываю всю запись...", true);
 
     try {
@@ -889,9 +1078,13 @@ async function toggleVoiceMessageRecording() {
       setLiveStatus(`Ошибка расшифровки: ${error.message}`, false);
     } finally {
       isRecordingVoiceMessage = false;
+      voiceMessageStopInFlight = false;
+      voiceMessageStartedAt = 0;
       voiceMessageBtn.disabled = false;
       voiceMessageBtn.classList.remove("recording");
       voiceMessageBtn.setAttribute("aria-label", "Записать голосовое сообщение");
+      voiceRecordingStatus?.classList.add("hidden");
+      voiceRecordingStatus?.classList.remove("is-transcribing");
     }
     return;
   }
@@ -902,6 +1095,7 @@ async function toggleVoiceMessageRecording() {
   }
 
   isRecordingVoiceMessage = true;
+  voiceMessageStartedAt = Date.now();
   voiceMessageBtn.classList.add("recording");
   voiceMessageBtn.setAttribute("aria-label", "Идёт запись...");
   setLiveStatus("🔴 Записываю голосовое сообщение. Нажмите ещё раз для остановки", true);
@@ -914,10 +1108,62 @@ async function toggleVoiceMessageRecording() {
     }
   } catch (error) {
     isRecordingVoiceMessage = false;
+    voiceMessageStartedAt = 0;
     voiceMessageBtn.classList.remove("recording");
     voiceMessageBtn.setAttribute("aria-label", "Записать голосовое сообщение");
     setLiveStatus(`Ошибка записи: ${error.message}`, false);
   }
+}
+
+function updateVoiceAudioMeter(meter, level) {
+  if (!meter) return;
+  if (!meter.children.length) {
+    const fragment = document.createDocumentFragment();
+    for (let index = 0; index < 18; index += 1) {
+      const bar = document.createElement("span");
+      const height = 0.12 + Math.abs(Math.sin((index + 1) * 1.61)) * 0.32;
+      bar.style.setProperty("--bar-height", height.toFixed(2));
+      fragment.appendChild(bar);
+    }
+    meter.appendChild(fragment);
+  }
+  const normalized = Math.max(0, Math.min(1, Number(level) || 0));
+  meter.style.setProperty("--meter-level", normalized.toFixed(3));
+  meter.classList.toggle("is-idle", normalized < 0.015);
+}
+
+function updateVoiceRecordingIndicator(state) {
+  const messageActive = Boolean(state.message_recording || state.message_transcribing);
+  const wakeActive = Boolean(state.enabled && state.listening);
+  const visible = messageActive || wakeActive;
+  voiceRecordingStatus?.classList.toggle("hidden", !visible);
+  const transcribing = Boolean(state.message_transcribing);
+  voiceRecordingStatus?.classList.toggle("is-transcribing", transcribing);
+
+  if (messageActive) {
+    if (voiceRecordingLabel) {
+      const phase = state.message_phase || (transcribing ? "transcribing" : "recording");
+      voiceRecordingLabel.textContent = phase === "connecting"
+        ? "Подключаю микрофон…"
+        : phase === "transcribing" ? "Расшифровываю запись…" : "Говорите — идёт запись";
+    }
+    if (voiceRecordingTranscript) voiceRecordingTranscript.textContent = state.message_text || "";
+    updateVoiceAudioMeter(voiceRecordingMeter, transcribing ? 0 : state.message_audio_level);
+    if (voiceRecordingTimer) {
+      const elapsed = voiceMessageStartedAt ? Math.floor((Date.now() - voiceMessageStartedAt) / 1000) : 0;
+      voiceRecordingTimer.textContent = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`;
+    }
+  } else if (wakeActive) {
+    if (voiceRecordingLabel) {
+      voiceRecordingLabel.textContent = state.phase === "capturing" ? "Слушаю команду…" : "Слушаю wake word";
+    }
+    if (voiceRecordingTranscript) voiceRecordingTranscript.textContent = state.live_text || "";
+    if (voiceRecordingTimer) voiceRecordingTimer.textContent = "";
+    updateVoiceAudioMeter(voiceRecordingMeter, state.audio_level);
+  }
+
+  updateVoiceAudioMeter(voiceOverlayMeter, state.audio_level);
+  voiceOverlayMeter?.classList.toggle("is-idle", Number(state.audio_level || 0) < 0.015);
 }
 
 async function pollVoiceState() {
@@ -930,6 +1176,16 @@ async function pollVoiceState() {
 
     lastVoiceEnabled = Boolean(data.enabled);
     updateVoiceOverlay(data);
+    updateVoiceRecordingIndicator(data);
+
+    const messageActive = Boolean(data.message_recording || data.message_transcribing);
+    if (!voiceMessageStopInFlight && isRecordingVoiceMessage && !messageActive) {
+      isRecordingVoiceMessage = false;
+      voiceMessageStartedAt = 0;
+      voiceMessageBtn?.classList.remove("recording");
+      voiceMessageBtn?.setAttribute("aria-label", "Записать голосовое сообщение");
+      if (data.message_error) setLiveStatus(`Ошибка записи: ${data.message_error}`, false);
+    }
 
     if (
       data.enabled &&
@@ -1923,6 +2179,7 @@ function createMessage(role, body = "", options = {}) {
     toggle.className = 'thinking-toggle';
     toggle.innerHTML = `
       <span class="thinking-mode-indicator" aria-hidden="true"></span>
+      <span class="thinking-activity-icon" aria-hidden="true"></span>
       <span class="thinking-toggle-copy">
         <span class="toggle-text">Думаю</span>
         <span class="thinking-activity-text">Модель анализирует запрос…</span>
@@ -3171,6 +3428,62 @@ function finalizeActiveThoughtEntry(state) {
   state.activeThoughtId = null;
 }
 
+const TOOL_ACTIVITY_META = {
+  run_cmd: ["terminal", "Выполняю команду"], run_command: ["terminal", "Выполняю команду"],
+  run_python: ["code", "Запускаю Python-код"], search_web: ["search", "Ищу в интернете"],
+  web_search: ["search", "Ищу в интернете"], read_url: ["globe", "Читаю веб-страницу"],
+  fetch_url: ["globe", "Читаю веб-страницу"], find_person: ["compass", "Ищу публичные профили"],
+  generate_image: ["image", "Создаю изображение"], read_file: ["file", "Читаю файл"],
+  read_code: ["file", "Читаю код"], search_text_in_file: ["search", "Ищу в коде"],
+  grep_code: ["search", "Ищу в коде"], list_directory: ["folder", "Просматриваю файлы"],
+  write_file: ["edit", "Записываю файл"], edit_code: ["tools", "Редактирую код"],
+  take_screenshot: ["camera", "Делаю снимок экрана"], click: ["pointer", "Нажимаю на элемент"],
+  type_text: ["keyboard", "Ввожу текст"], ask_user: ["chat", "Готовлю вопрос"],
+  run_background_task: ["settings", "Запускаю фоновую задачу"]
+};
+
+const ACTIVITY_ICON_PATHS = {
+  terminal: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3m6 0h4"/>',
+  code: '<path d="m8 8-4 4 4 4m8-8 4 4-4 4m-3-10-2 12"/>',
+  search: '<circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/>',
+  compass: '<circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2.2 4.8-4.8 2.2 2.2-4.8z"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m21 15-5-5L5 20"/>',
+  file: '<path d="M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10z"/><path d="M13 3v7h7"/>',
+  folder: '<path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  edit: '<path d="m15 5 4 4M4 20l4-.8L19 8a2.1 2.1 0 0 0-3-3L5 16z"/>',
+  tools: '<path d="M14.5 6.5a5 5 0 0 0-6 6L3 18l3 3 5.5-5.5a5 5 0 0 0 6-6L14 13l-3-3z"/>',
+  camera: '<path d="M4 7h4l1.5-2h5L16 7h4v12H4z"/><circle cx="12" cy="13" r="3.5"/>',
+  pointer: '<path d="m5 3 14 10-7 1-3 6z"/>',
+  keyboard: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M10 10h.01M13 10h.01M16 10h.01M7 13h.01M10 13h.01M13 13h.01M16 13h.01M8 16h8"/>',
+  chat: '<path d="M20 11.5a7.5 7.5 0 0 1-8 7.5 8 8 0 0 1-3.5-.8L4 20l1.5-4A7 7 0 0 1 4 11.5 7.5 7.5 0 0 1 12 4a7.5 7.5 0 0 1 8 7.5Z"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.4 1.1-1.4 2.4-1.7-.7a8 8 0 0 1-1.6.9l-.3 1.8h-2.8l-.3-1.8a8 8 0 0 1-1.6-.9l-1.7.7-1.4-2.4 1.4-1.1a7 7 0 0 1 0-1.9l-1.4-1.1 1.4-2.4 1.7.7a8 8 0 0 1 1.6-.9l.3-1.8h2.8l.3 1.8a8 8 0 0 1 1.6.9l1.7-.7 1.4 2.4-1.4 1.1a7 7 0 0 1-.1 1.8Z"/>',
+  user: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>',
+  brain: '<path d="M12 5a3 3 0 0 0-5.8 1.1A3.5 3.5 0 0 0 5 12a3.5 3.5 0 0 0 1.2 5.9A3 3 0 0 0 12 19zm0 0a3 3 0 0 1 5.8 1.1A3.5 3.5 0 0 1 19 12a3.5 3.5 0 0 1-1.2 5.9A3 3 0 0 1 12 19M8 9h4m-5 5h5m0-7v12"/>',
+  check: '<path d="m5 12 4 4L19 6"/>',
+  tool: '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>'
+};
+
+function activityIconSvg(iconName) {
+  const paths = ACTIVITY_ICON_PATHS[iconName] || ACTIVITY_ICON_PATHS.tool;
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+}
+
+function getToolActivityMeta(toolName) {
+  const name = String(toolName || "").trim();
+  const normalized = name.toLowerCase();
+  if (TOOL_ACTIVITY_META[normalized]) {
+    const [icon, label] = TOOL_ACTIVITY_META[normalized];
+    return { icon, label, name: label };
+  }
+  if (/telegram|social|profile/.test(normalized)) return { icon: "search", label: "Ищу публичную информацию", name: "Поиск публичной информации" };
+  if (/search|browser|web/.test(normalized)) return { icon: "globe", label: "Ищу в интернете", name: "Поиск в интернете" };
+  if (/file|directory|folder/.test(normalized)) return { icon: "folder", label: "Работаю с файлами", name: "Работа с файлами" };
+  if (/terminal|command|shell/.test(normalized)) return { icon: "terminal", label: "Выполняю команду", name: "Команда в терминале" };
+  const friendly = name.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+  return { icon: "tool", label: friendly ? `Выполняю: ${friendly}` : "Выполняю инструмент", name: friendly || "Инструмент" };
+}
+
 function updateThinkingToggle(state) {
   if (!state?.toggleNode) {
     return;
@@ -3179,6 +3492,7 @@ function updateThinkingToggle(state) {
   const toggle = state.toggleNode;
   const toggleText = toggle.querySelector(".toggle-text");
   const activityNode = toggle.querySelector(".thinking-activity-text");
+  const activityIcon = toggle.querySelector(".thinking-activity-icon");
   const countNode = toggle.querySelector(".timeline-count");
 
   toggle.classList.toggle("still-thinking", state.mode !== "done");
@@ -3205,6 +3519,11 @@ function updateThinkingToggle(state) {
   if (activityNode) {
     activityNode.textContent = state.activityLabel || "";
     activityNode.classList.toggle("hidden", !state.activityLabel);
+  }
+  if (activityIcon) {
+    const meta = state.activeToolName ? getToolActivityMeta(state.activeToolName) : null;
+    activityIcon.innerHTML = activityIconSvg(meta?.icon || (state.mode === "done" ? "check" : "brain"));
+    activityIcon.classList.toggle("tool-active", Boolean(meta && state.mode !== "done"));
   }
 
   if (countNode) {
@@ -3257,12 +3576,12 @@ function scheduleThinkingIdleActivity(state) {
     }
 
     if (state.mode === "tool_writing" && state.activeToolName) {
-      setThinkingActivity(state, `Модель пишет инструмент ${state.activeToolName}…`);
+      setThinkingActivity(state, `${getToolActivityMeta(state.activeToolName).label}…`);
       return;
     }
 
     if (state.mode === "tool" && state.activeToolName) {
-      setThinkingActivity(state, `Инструмент ${state.activeToolName} выполняется…`);
+      setThinkingActivity(state, `${getToolActivityMeta(state.activeToolName).label}…`);
       return;
     }
 
@@ -3307,7 +3626,7 @@ function syncThoughtTimeline(state, content) {
   state.mode = "thinking";
   state.activeToolName = "";
   state.lastEventKind = "thinking";
-  state.activityLabel = "Модель пишет мысли…";
+  state.activityLabel = "Модель размышляет…";
 
   if (!state.buffer.trim()) {
     updateThinkingToggle(state);
@@ -3329,7 +3648,9 @@ function syncThoughtTimeline(state, content) {
       patchStreamingRichText(thoughtBody, entry.content);
       thoughtBody.dataset.entryId = entry.id;
       if (preview) {
-        preview.textContent = makeTimelinePreview(entry.content);
+        const summary = makeTimelinePreview(entry.content);
+        preview.textContent = summary.text;
+        row?.classList.toggle("summarizing", summary.summarizing);
       }
     } else {
       renderThinkingTimeline(state, { animate: true });
@@ -3359,9 +3680,7 @@ function addToolTimelineEntry(state, toolName, args, toolCallId) {
   state.mode = "tool";
   state.activeToolName = toolName || "";
   state.lastEventKind = "tool_call";
-  state.activityLabel = toolName
-    ? `Модель вызывает ${toolName}…`
-    : "Модель вызывает инструмент…";
+  state.activityLabel = `${getToolActivityMeta(toolName).label}…`;
 
   const entry = {
     id: toolCallId || createTimelineId(`tool-${toolName || "call"}`),
@@ -3396,8 +3715,8 @@ function updateToolTimelineEntry(state, toolCallId, result, success, images = []
   state.activeToolName = "";
   state.lastEventKind = "tool_result";
   state.activityLabel = entry.success
-    ? `Модель анализирует результат ${entry.name}…`
-    : `Модель разбирает ошибку ${entry.name}…`;
+    ? `Анализирую результат: ${getToolActivityMeta(entry.name).name}…`
+    : `Разбираю ошибку: ${getToolActivityMeta(entry.name).name}…`;
   updateThinkingToggle(state);
   scheduleThinkingIdleActivity(state);
   if (state.expanded) {
@@ -3422,9 +3741,7 @@ function upsertStreamingToolTimelineEntry(state, toolCallId, toolName, arguments
   state.mode = "tool_writing";
   state.activeToolName = toolName || "";
   state.lastEventKind = "tool_call";
-  state.activityLabel = toolName
-    ? `Модель пишет инструмент ${toolName}…`
-    : "Модель пишет инструмент…";
+  state.activityLabel = `${getToolActivityMeta(toolName).label}…`;
 
   const existing = state.timeline.find((item) => item.type === "tool_streaming" && item.id === toolCallId);
   if (existing) {
@@ -3454,7 +3771,11 @@ function upsertStreamingToolTimelineEntry(state, toolCallId, toolName, arguments
     if (existing && row) {
       const nameNode = row.querySelector(".timeline-row-name");
       const argsNode = row.querySelector(".tool-args");
-      if (nameNode) nameNode.textContent = existing.name;
+      if (nameNode) nameNode.textContent = getToolActivityMeta(existing.name).name;
+      const techNameNode = row.querySelector(".timeline-row-tech-name");
+      if (techNameNode) techNameNode.textContent = existing.name;
+      const iconNode = row.querySelector(".timeline-row-tool-icon");
+      if (iconNode) iconNode.innerHTML = activityIconSvg(getToolActivityMeta(existing.name).icon);
       if (argsNode) argsNode.textContent = existing.argsFormatted;
     } else {
       renderThinkingTimeline(state);
@@ -3469,9 +3790,7 @@ function finalizeStreamingToolTimelineEntry(state, toolCallId) {
   }
   entry.stage = "finish";
   entry.status = "queued";
-  state.activityLabel = entry.name
-    ? `Модель закончила писать ${entry.name}, жду выполнения…`
-    : "Модель закончила писать инструмент, жду выполнения…";
+  state.activityLabel = `Готовлю запуск: ${getToolActivityMeta(entry.name).name}…`;
   updateThinkingToggle(state);
   scheduleThinkingIdleActivity(state);
   if (state.expanded) {
@@ -3523,9 +3842,7 @@ function promoteStreamingToolToWorking(state, toolCallId, toolName, args) {
   state.mode = "tool";
   state.activeToolName = toolName || "";
   state.lastEventKind = "tool_call";
-  state.activityLabel = toolName
-    ? `Модель вызывает ${toolName}…`
-    : "Модель вызывает инструмент…";
+  state.activityLabel = `${getToolActivityMeta(toolName).label}…`;
   updateThinkingToggle(state);
   scheduleThinkingIdleActivity(state);
   if (state.expanded) {
@@ -3571,13 +3888,54 @@ function getTimelineRowStatus(entry) {
   };
 }
 
-function makeTimelinePreview(content, maxLength = 90) {
+function makeTimelinePreview(content, maxLength = 90, completed = false) {
   const text = String(content || "")
     .replace(/<[^>]+>/g, " ")
+    .replace(/```[\s\S]*?```/g, " фрагмент кода ")
+    .replace(/[`*_#>|\[\]()>~]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  if (!text) return "…";
-  return text.length > maxLength ? text.slice(0, maxLength) + "…" : text;
+  if (!text) return { text: "…", summarizing: false };
+
+  const threshold = 180;
+  const paragraphs = String(content || "")
+    .replace(/\r/g, "")
+    .split(/\n+/)
+    .map((part) => part.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  let latest = paragraphs.at(-1) || text;
+  const activeParagraphLength = latest.length;
+  if (paragraphs.length === 1 && latest.length > threshold) {
+    const sentences = latest.split(/(?<=[.!?])\s+/).filter(Boolean);
+    if (sentences.length > 1) latest = sentences.at(-1);
+  }
+
+  latest = latest
+    .replace(/```[\s\S]*?```/g, "фрагмент кода")
+    .replace(/[`*_#>|\[\]()>~]/g, " ")
+    .replace(/^(?:(?:let me|now i(?:'ll| will| need to)|i(?:'ll| will| need to| should)|let's|first|next|now)\b|(?:давай(?:те)?|сначала|теперь|сейчас|мне нужно|я должен|я проверю)\b)[,:\s-]*/i, "")
+    .replace(/^(?:key finding|main finding|вывод|ключевой вывод)\s*:\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const sentences = latest.split(/(?<=[.!?])\s+/).filter(Boolean);
+  if (sentences.length > 1) {
+    const ignored = new Set(["the", "and", "for", "with", "this", "that", "from", "into", "then", "что", "это", "как", "для", "или", "при", "этот", "эта", "его"]);
+    latest = sentences
+      .map((sentence, index) => {
+        const words = sentence.toLowerCase().match(/[\p{L}\p{N}_-]{3,}/gu) || [];
+        const signal = words.filter((word) => !ignored.has(word)).length;
+        const meta = /^(?:let me|i will|i need to|now i|давай|теперь|сейчас)\b/i.test(sentence) ? 8 : 0;
+        return { sentence, score: signal - meta - index * 0.1 };
+      })
+      .sort((a, b) => b.score - a.score)[0].sentence;
+  }
+  if (!latest) latest = text;
+  const summarizing = !completed && activeParagraphLength >= threshold;
+  const preview = latest.length > maxLength
+    ? `${latest.slice(0, maxLength - 1).replace(/\s+\S*$/, "").trimEnd()}…`
+    : latest;
+  return { text: preview || "…", summarizing };
 }
 
 function renderThinkingTimeline(state, options = {}) {
@@ -3615,7 +3973,9 @@ function renderThinkingTimeline(state, options = {}) {
             <div class="timeline-row-header">
               <span class="timeline-row-chevron" aria-hidden="true">▸</span>
               <span class="timeline-row-dot streaming"></span>
-              <span class="timeline-row-name">${escapeHtml(entry.name)}</span>
+              <span class="timeline-row-tool-icon" aria-hidden="true">${activityIconSvg(getToolActivityMeta(entry.name).icon)}</span>
+              <span class="timeline-row-name">${escapeHtml(getToolActivityMeta(entry.name).name)}</span>
+              <span class="timeline-row-tech-name">${escapeHtml(entry.name)}</span>
               <span class="timeline-row-status streaming">пишет…</span>
             </div>
             <div class="timeline-row-body">
@@ -3632,7 +3992,9 @@ function renderThinkingTimeline(state, options = {}) {
             <div class="timeline-row-header">
               <span class="timeline-row-chevron" aria-hidden="true">▸</span>
               <span class="timeline-row-dot ${status.dotClass}"></span>
-              <span class="timeline-row-name">${escapeHtml(entry.name)}</span>
+              <span class="timeline-row-tool-icon" aria-hidden="true">${activityIconSvg(getToolActivityMeta(entry.name).icon)}</span>
+              <span class="timeline-row-name">${escapeHtml(getToolActivityMeta(entry.name).name)}</span>
+              <span class="timeline-row-tech-name">${escapeHtml(entry.name)}</span>
               <span class="timeline-row-status ${status.class}">${escapeHtml(status.text)}</span>
             </div>
             <div class="timeline-row-body">
@@ -3647,13 +4009,15 @@ function renderThinkingTimeline(state, options = {}) {
       }
 
       const thoughtHtml = renderRichText(entry.content || "");
-      const thoughtPreview = makeTimelinePreview(entry.content || "");
+      const thoughtSummary = makeTimelinePreview(entry.content || "", 90, entry.completed);
+      const thoughtPreview = thoughtSummary.text;
       return `
-        <div class="timeline-row thought-row ${entry.completed ? "completed" : "streaming"} ${expandState}" data-entry-id="${entryId}" data-entry-type="thought">
+        <div class="timeline-row thought-row ${entry.completed ? "completed" : "streaming"} ${thoughtSummary.summarizing ? "summarizing" : ""} ${expandState}" data-entry-id="${entryId}" data-entry-type="thought">
           <div class="timeline-row-header">
             <span class="timeline-row-chevron" aria-hidden="true">▸</span>
             <span class="timeline-row-dot ${status.dotClass}"></span>
             <span class="timeline-row-name">Мысль</span>
+            <span class="timeline-row-summary-indicator" aria-label="Обновляю краткое описание"></span>
             <span class="timeline-row-preview">${escapeHtml(thoughtPreview)}</span>
           </div>
           <div class="timeline-row-body" data-entry-id="${entryId}">
@@ -3832,6 +4196,7 @@ function updatePresetFormVisibility() {
       presetSetupHint.textContent = `Конфиг: ${configPath}. llama-server: github.com/ggerganov/llama.cpp/releases`;
     }
   }
+  loadPresetOptions();
 }
 
 function formatBytes(value) {
@@ -3860,18 +4225,53 @@ async function loadLocalModels() {
     return;
   }
   try {
-    const response = await fetch("/api/models/local");
+    const isLlama = !isMacOs || (presetBackendSelect?.value || "llama-server") === "llama-server";
+    const response = await fetch(isLlama ? "/api/config/preset-options" : "/api/models/local");
     const data = await response.json();
     if (!response.ok || !data.ok) {
       throw new Error(data.detail || "Не удалось загрузить список локальных моделей");
     }
-    localModelsCache = Array.isArray(data.models) ? data.models : [];
+    if (isLlama) {
+      const llamaServer = String(data.llama_server || "").trim();
+      if (llamaServer && presetLlamaInput && !presetLlamaInput.value.trim()) {
+        presetLlamaInput.value = llamaServer;
+      }
+      if (presetLlamaSelect) {
+        presetLlamaSelect.innerHTML = '<option value="">— выберите найденный сервер —</option>';
+        if (llamaServer) {
+          const option = document.createElement("option");
+          option.value = llamaServer;
+          option.textContent = llamaServer;
+          presetLlamaSelect.appendChild(option);
+          presetLlamaSelect.value = llamaServer;
+        }
+        presetLlamaSelect.classList.toggle("hidden", !llamaServer);
+      }
+      localModelsCache = (Array.isArray(data.models) ? data.models : [])
+        .filter((model) => model.role === "model");
+      if (localModelsCache.length && presetModelInput && !presetModelInput.value.trim()) {
+        presetModelInput.value = localModelsCache[0].path;
+      }
+      const mmproj = (Array.isArray(data.models) ? data.models : []).find((model) => model.role === "mmproj");
+      const mtp = (Array.isArray(data.models) ? data.models : []).find((model) => model.role === "mtp");
+      if (mmproj && presetMmprojInput && !presetMmprojInput.value.trim()) {
+        presetMmprojInput.value = mmproj.path;
+      }
+      if (mtp && presetMtpInput && !presetMtpInput.value.trim()) {
+        presetMtpInput.value = mtp.path;
+      }
+    } else {
+      localModelsCache = Array.isArray(data.models) ? data.models : [];
+    }
     presetLocalModelsSelect.innerHTML = '<option value="">— выберите найденную модель —</option>';
     for (const model of localModelsCache) {
       const option = document.createElement("option");
       option.value = model.path;
       option.textContent = model.name;
       presetLocalModelsSelect.appendChild(option);
+    }
+    if (presetModelInput?.value) {
+      presetLocalModelsSelect.value = presetModelInput.value;
     }
     presetLocalModelsSelect.classList.toggle("hidden", localModelsCache.length === 0);
   } catch (error) {
@@ -3880,6 +4280,10 @@ async function loadLocalModels() {
       presetLocalModelsSelect.classList.add("hidden");
     }
   }
+}
+
+function loadPresetOptions() {
+  return loadLocalModels();
 }
 
 function stopDownload() {
@@ -4277,6 +4681,263 @@ async function saveEnabledToolsFromUI() {
   }
 }
 
+// === Системные промты ===
+let systemPromptProfiles = [];
+let editingSystemPromptId = null;
+
+const SYSTEM_PROMPT_ICONS = {
+  check: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.5 2.5 5-5.5"/></svg>`,
+  circle: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/></svg>`,
+  lock: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`,
+  pencil: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>`,
+  trash: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`,
+};
+
+async function loadSystemPrompts() {
+  if (!systemPromptList) {
+    return;
+  }
+  try {
+    const response = await fetch("/api/system-prompts");
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      throw new Error(data.detail || "Не удалось загрузить промты");
+    }
+    systemPromptProfiles = Array.isArray(data.profiles) ? data.profiles : [];
+    renderSystemPromptList();
+  } catch (error) {
+    systemPromptProfiles = [];
+    if (systemPromptList) {
+      systemPromptList.innerHTML = `<div class="system-prompt-empty">${escapeHtml(error.message || "Ошибка загрузки")}</div>`;
+    }
+  }
+}
+
+function renderSystemPromptList() {
+  if (!systemPromptList) {
+    return;
+  }
+  if (!systemPromptProfiles.length) {
+    systemPromptList.innerHTML = '<div class="system-prompt-empty">Нет профилей</div>';
+    return;
+  }
+
+  systemPromptList.innerHTML = systemPromptProfiles.map((profile) => {
+    const profileId = escapeHtml(profile.id || "");
+    const name = escapeHtml(profile.name || "Без названия");
+    const isActive = Boolean(profile.is_active);
+    const isDefault = Boolean(profile.is_default);
+    const statusIcon = isActive ? SYSTEM_PROMPT_ICONS.check : SYSTEM_PROMPT_ICONS.circle;
+    const badge = isDefault
+      ? `<span class="system-prompt-badge">${SYSTEM_PROMPT_ICONS.lock}<span>встроенный</span></span>`
+      : '<span class="system-prompt-badge is-custom"><span>свой</span></span>';
+    const actions = isDefault
+      ? ""
+      : `<span class="system-prompt-actions">
+          <button type="button" class="system-prompt-action" data-edit-prompt="${profileId}" aria-label="Изменить" title="Изменить">${SYSTEM_PROMPT_ICONS.pencil}</button>
+          <button type="button" class="system-prompt-action is-danger" data-delete-prompt="${profileId}" aria-label="Удалить" title="Удалить">${SYSTEM_PROMPT_ICONS.trash}</button>
+        </span>`;
+    return `
+      <div class="system-prompt-item ${isActive ? "is-active" : ""}" data-prompt-id="${profileId}" role="button" tabindex="0">
+        <span class="system-prompt-radio ${isActive ? "is-active" : ""}" aria-hidden="true">${statusIcon}</span>
+        <span class="system-prompt-info">
+          <span class="system-prompt-name">${name}</span>
+          ${badge}
+        </span>
+        ${actions}
+      </div>
+    `;
+  }).join("");
+
+  systemPromptList.querySelectorAll(".system-prompt-item").forEach((item) => {
+    const selectProfile = () => selectSystemPrompt(item.dataset.promptId);
+    item.addEventListener("click", (event) => {
+      if (event.target.closest(".system-prompt-action")) {
+        return;
+      }
+      selectProfile();
+    });
+    item.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        selectProfile();
+      }
+    });
+  });
+
+  systemPromptList.querySelectorAll("[data-edit-prompt]").forEach((button) => {
+    button.addEventListener("click", () => openSystemPromptModal(button.dataset.editPrompt));
+  });
+  systemPromptList.querySelectorAll("[data-delete-prompt]").forEach((button) => {
+    button.addEventListener("click", () => deleteSystemPrompt(button.dataset.deletePrompt));
+  });
+}
+
+async function selectSystemPrompt(profileId) {
+  const profile = systemPromptProfiles.find((entry) => entry.id === profileId);
+  if (!profile || profile.is_active) {
+    return;
+  }
+  try {
+    const response = await fetch("/api/system-prompts/active", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile_id: profileId }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.detail || "Не удалось переключить промт");
+    }
+    systemPromptProfiles = Array.isArray(data.profiles) ? data.profiles : systemPromptProfiles;
+    renderSystemPromptList();
+    if (systemPromptHint) {
+      systemPromptHint.textContent = `Активен промт: ${profile.name}. Применяется к новым сообщениям.`;
+    }
+  } catch (error) {
+    if (systemPromptHint) {
+      systemPromptHint.textContent = error.message || "Не удалось переключить промт";
+    }
+  }
+}
+
+function setSystemPromptModalOpen(open) {
+  if (!systemPromptModal) {
+    return;
+  }
+  systemPromptModal.classList.toggle("hidden", !open);
+  systemPromptModal.setAttribute("aria-hidden", open ? "false" : "true");
+  if (!open) {
+    editingSystemPromptId = null;
+    if (systemPromptForm) {
+      systemPromptForm.reset();
+    }
+    if (systemPromptError) {
+      systemPromptError.classList.add("hidden");
+      systemPromptError.textContent = "";
+    }
+  }
+}
+
+async function openSystemPromptModal(profileId) {
+  if (!systemPromptModal || !systemPromptNameInput || !systemPromptContentInput) {
+    return;
+  }
+  editingSystemPromptId = profileId || null;
+  if (systemPromptError) {
+    systemPromptError.classList.add("hidden");
+    systemPromptError.textContent = "";
+  }
+  if (systemPromptModalTitle) {
+    systemPromptModalTitle.textContent = profileId ? "Изменить промт" : "Новый промт";
+  }
+  systemPromptNameInput.value = "";
+  systemPromptContentInput.value = "";
+  if (profileId) {
+    const profile = systemPromptProfiles.find((entry) => entry.id === profileId);
+    if (profile) {
+      systemPromptNameInput.value = profile.name || "";
+    }
+    try {
+      const response = await fetch(`/api/system-prompts/${encodeURIComponent(profileId)}`);
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || "Не удалось загрузить промт");
+      }
+      systemPromptContentInput.value = data.content || "";
+    } catch (error) {
+      if (systemPromptHint) {
+        systemPromptHint.textContent = error.message || "Не удалось загрузить промт";
+      }
+      return;
+    }
+  }
+  setSystemPromptModalOpen(true);
+  systemPromptNameInput.focus();
+}
+
+async function deleteSystemPrompt(profileId) {
+  const profile = systemPromptProfiles.find((entry) => entry.id === profileId);
+  if (!profile) {
+    return;
+  }
+  if (!window.confirm(`Удалить промт "${profile.name}"?`)) {
+    return;
+  }
+  try {
+    const response = await fetch(`/api/system-prompts/${encodeURIComponent(profileId)}`, {
+      method: "DELETE",
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.detail || "Не удалось удалить промт");
+    }
+    systemPromptProfiles = Array.isArray(data.profiles) ? data.profiles : [];
+    renderSystemPromptList();
+    if (systemPromptHint) {
+      systemPromptHint.textContent = `Промт "${profile.name}" удалён.`;
+    }
+  } catch (error) {
+    if (systemPromptHint) {
+      systemPromptHint.textContent = error.message || "Не удалось удалить промт";
+    }
+  }
+}
+
+if (systemPromptForm) {
+  systemPromptForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!systemPromptNameInput || !systemPromptContentInput) {
+      return;
+    }
+    const name = systemPromptNameInput.value.trim();
+    const content = systemPromptContentInput.value;
+    if (systemPromptError) {
+      systemPromptError.classList.add("hidden");
+      systemPromptError.textContent = "";
+    }
+    try {
+      const isEdit = Boolean(editingSystemPromptId);
+      const response = await fetch(isEdit
+        ? `/api/system-prompts/${encodeURIComponent(editingSystemPromptId)}`
+        : "/api/system-prompts", {
+        method: isEdit ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, content }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || "Не удалось сохранить промт");
+      }
+      systemPromptProfiles = Array.isArray(data.profiles) ? data.profiles : [];
+      renderSystemPromptList();
+      setSystemPromptModalOpen(false);
+      if (systemPromptHint) {
+        systemPromptHint.textContent = isEdit
+          ? `Промт "${name}" обновлён.`
+          : `Промт "${name}" добавлен. Выберите его в списке, чтобы применить.`;
+      }
+    } catch (error) {
+      if (systemPromptError) {
+        systemPromptError.textContent = error.message || "Не удалось сохранить промт";
+        systemPromptError.classList.remove("hidden");
+      }
+    }
+  });
+}
+
+if (systemPromptModalCloseBtn) {
+  systemPromptModalCloseBtn.addEventListener("click", () => setSystemPromptModalOpen(false));
+}
+if (systemPromptAddBtn) {
+  systemPromptAddBtn.addEventListener("click", () => openSystemPromptModal());
+}
+if (systemPromptCancelBtn) {
+  systemPromptCancelBtn.addEventListener("click", () => setSystemPromptModalOpen(false));
+}
+if (systemPromptModal) {
+  systemPromptModal.querySelector(".system-prompt-backdrop")?.addEventListener("click", () => setSystemPromptModalOpen(false));
+}
+
 async function selectPresetByIndex(presetIndex) {
   const response = await fetch("/api/config/presets/select", {
     method: "POST",
@@ -4476,7 +5137,7 @@ async function refreshHealth() {
       } else if (ttsLoaded) {
         ttsToggleHint.textContent = `Модель озвучки загружена${ttsDevice}`;
       } else {
-        ttsToggleHint.textContent = "Голосовой вывод Jarvis через Supertonic 3 (CPU)";
+        ttsToggleHint.textContent = "Supertonic 3: ускоренная озвучка (CPU; GPU-провайдер недоступен)";
       }
     }
 
@@ -4494,7 +5155,7 @@ async function refreshHealth() {
       const backendLabel = data.voice_backend_label ? ` | STT: ${data.voice_backend_label}` : "";
       voiceToggleHint.textContent = voiceAvailable
         ? (voiceEnabled ? `Слушает wake word: "${wakeWord}"${backendLabel}` : `Wake word: "${wakeWord}"${backendLabel}`)
-        : "Vosk или микрофон недоступны";
+        : "GigaAM или микрофон недоступны";
     }
   }
 
@@ -4580,7 +5241,7 @@ async function updateTtsSetting(enabled) {
     if (ttsToggleHint) {
       ttsToggleHint.textContent = ttsLoaded
         ? "Перезапустите для отключения"
-        : "Голосовой вывод Jarvis через Supertonic 3 (CPU)";
+        : "Supertonic 3: ускоренная озвучка (CPU; GPU-провайдер недоступен)";
     }
 
     ttsToggle.title = ttsLoaded ? "Перезапустите для отключения" : "";
@@ -4609,9 +5270,7 @@ async function updateAsrSetting(engineKey) {
   }
 
   setLiveStatus(
-    engineKey === "vosk_large"
-      ? "Подготавливаю большую модель Vosk для распознавания команд..."
-      : "Переключаю распознавание команд на Vosk...",
+    "Загружаю GigaAM для распознавания команд...",
     true
   );
 
@@ -4679,58 +5338,106 @@ async function updateVoiceSetting(enabled) {
   }
 }
 
+const MODEL_BOOT_STEPS = {
+  queued: 0,
+  validating: 0,
+  starting: 1,
+  loading: 2,
+  checking: 3,
+  ready: 3,
+};
+
+function setModelBootStep(phase, message = "", stepOverride = null) {
+  const activeIndex = Number.isInteger(stepOverride) ? stepOverride : (MODEL_BOOT_STEPS[phase] ?? 0);
+  modelBootScreen?.classList.toggle("is-error", phase === "error");
+  modelBootScreen?.classList.toggle("is-ready", phase === "ready");
+  modelBootSteps?.querySelectorAll("[data-boot-step]").forEach((step) => {
+    const index = Number(step.dataset.bootStep);
+    step.classList.toggle("is-complete", phase === "ready" || index < activeIndex);
+    step.classList.toggle("is-active", phase !== "error" && phase !== "ready" && index === activeIndex);
+    step.classList.toggle("is-failed", phase === "error" && index === activeIndex);
+  });
+  if (modelBootMessage && message) modelBootMessage.textContent = message;
+}
+
+function openModelBootScreen(modelLabel = "") {
+  modelBootScreen?.classList.remove("hidden", "is-error", "is-ready");
+  loadingScreen?.classList.add("is-model-booting");
+  if (modelBootTitle) modelBootTitle.textContent = modelLabel ? `Запускаю ${modelLabel}` : "Запуск модели";
+  if (modelBootError) modelBootError.classList.add("hidden");
+  if (modelBootErrorDetails) modelBootErrorDetails.classList.add("hidden");
+  if (modelBootErrorLog) modelBootErrorLog.textContent = "";
+  modelBootSteps?.querySelectorAll("[data-boot-step]").forEach((step) => step.classList.remove("is-complete", "is-active", "is-failed"));
+  setModelBootStep("validating", "Проверяю пресет и подготавливаю запуск…");
+}
+
+function showModelBootError(message, details = "", stepIndex = null) {
+  setModelBootStep("error", "Модель не запустилась. Проверьте сообщение и попробуйте ещё раз.", stepIndex);
+  if (modelBootErrorMessage) modelBootErrorMessage.textContent = message || "Не удалось запустить модель.";
+  if (modelBootErrorLog) modelBootErrorLog.textContent = details;
+  modelBootErrorDetails?.classList.toggle("hidden", !details);
+  modelBootError?.classList.remove("hidden");
+  if (loadingStartBtn) loadingStartBtn.disabled = false;
+}
+
+async function enterMainInterface() {
+  modelBootScreen?.classList.add("hidden");
+  loadingScreen?.classList.add("is-ready");
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  loadingScreen?.classList.add("hidden");
+  loadingScreen?.classList.remove("is-ready", "is-model-booting");
+  document.querySelector(".shell")?.classList.remove("hidden");
+  await refreshContext();
+  setLiveStatus("Готов к работе", false);
+  syncEmptyChatState();
+}
+
 async function startModelFromLoadingScreen() {
   if (!loadingStartBtn || !loadingModelSelect) return;
 
   const selectedModelKey = loadingModelSelect.value;
   const selectedPreset = modelsCache.find((model) => model.key === selectedModelKey);
   currentModelKey = selectedModelKey;
-
-  if (selectedPreset?.config_index !== undefined) {
-    await selectPresetByIndex(selectedPreset.config_index);
-  }
-
-  if (loadingAsrSelect && loadingAsrSelect.value) {
-    await updateAsrSetting(loadingAsrSelect.value);
-  }
-
+  openModelBootScreen(selectedPreset?.label || "");
   loadingStartBtn.disabled = true;
-  loadingStatusText.textContent = "Запускаю сервер модели...";
 
   try {
+    if (selectedPreset?.config_index !== undefined) {
+      await selectPresetByIndex(selectedPreset.config_index);
+    }
+    if (loadingAsrSelect && loadingAsrSelect.value) {
+      await updateAsrSetting(loadingAsrSelect.value);
+    }
+
     const response = await fetch("/api/server/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model_key: selectedModelKey }),
     });
-
     const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.detail || "Не удалось запустить модель");
-    }
+    if (!response.ok || !data.ok) throw new Error(data.detail || "Не удалось начать запуск модели.");
 
-    // Ждём пока сервер действительно поднимется (поллинг)
-    loadingStatusText.textContent = "Проверяю сервер...";
-    for (let i = 0; i < 300; i++) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      const isOnline = await refreshHealth();
-      if (isOnline) {
-        break;
+    const deadline = Date.now() + 330_000;
+    while (Date.now() < deadline) {
+      const statusResponse = await fetch("/api/server/start/status", { cache: "no-store" });
+      const status = await statusResponse.json();
+      if (!statusResponse.ok || !status.ok) throw new Error(status.detail || "Не удалось получить состояние запуска.");
+
+      setModelBootStep(status.phase, status.message);
+      if (status.phase === "error") {
+        showModelBootError(status.error || status.message, status.error_detail || "", status.step);
+        return;
       }
+      if (status.phase === "ready") {
+        await refreshHealth();
+        await enterMainInterface();
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 700));
     }
-
-    // Переходим в основной интерфейс только если сервер онлайн
-    if (serverIsOnline) {
-      loadingScreen.classList.add("hidden");
-      document.querySelector(".shell")?.classList.remove("hidden");
-      await refreshContext();
-      setLiveStatus("Готов к работе", false);
-      syncEmptyChatState();
-    } else {
-      loadingStatusText.textContent = "Сервер не отвечает. Попробуйте ещё раз.";
-    }
+    throw new Error("Истекло время ожидания запуска. Проверьте лог сервера и попробуйте ещё раз.");
   } catch (error) {
-    loadingStatusText.textContent = `Ошибка: ${error.message}`;
+    showModelBootError(error.message || "Не удалось запустить модель.");
   } finally {
     loadingStartBtn.disabled = false;
   }
@@ -4827,7 +5534,7 @@ async function runChatStream(message, images, options = {}) {
   }
 
   try {
-    const response = await fetch("/api/chat/stream", {
+    const response = await fetch(executionTargetSelect?.value === "remote" ? "/api/remote/chat/stream" : "/api/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message, images, chat_id: currentChatId }),
@@ -4969,9 +5676,7 @@ async function runChatStream(message, images, options = {}) {
       },
       tool_call: (payload) => {
         stopLiveStatusTimer();
-        const statusText = payload.tool_name === "generate_image"
-          ? "Генерация изображения..."
-          : `Вызов инструмента: ${payload.tool_name}`;
+      const statusText = `${getToolActivityMeta(payload.tool_name).label}…`;
         setLiveStatus(statusText, true);
         if (getAssistantText()) {
           assistantReplyClosed = true;
@@ -5127,6 +5832,15 @@ async function runChatStream(message, images, options = {}) {
         }
 
         renderMessageSpeed(assistantNode.article, payload.timings);
+        const changedFiles = payload.changes?.files || [];
+        if (changedFiles.length) {
+          const reviewButton = document.createElement("button");
+          reviewButton.type = "button";
+          reviewButton.className = "view-changes-action";
+          reviewButton.textContent = `Посмотреть изменения · ${changedFiles.length}`;
+          reviewButton.addEventListener("click", () => showChangeReview(payload.changes));
+          assistantNode.article.appendChild(reviewButton);
+        }
       },
       user_prompt: (payload) => {
         setUserPromptModalOpen(true, {
@@ -5200,7 +5914,7 @@ async function sendMessage(event) {
 
   // Estimate prompt size so the prefill progress bar can advance even when
   // llama-server does not stream real slot progress.
-  const contextData = await refreshContext();
+  const contextData = executionTargetSelect?.value === "remote" ? null : await refreshContext();
   const estimatedTokens = contextData?.used || 0;
 
   addMessage("user", message, { images });
@@ -5237,7 +5951,17 @@ if (loadingAsrSelect && loadingAsrDescription) {
   });
 }
 if (presetBackendSelect) {
-  presetBackendSelect.addEventListener("change", updatePresetFormVisibility);
+  presetBackendSelect.addEventListener("change", () => {
+    updatePresetFormVisibility();
+    loadPresetOptions();
+  });
+}
+if (presetLlamaSelect) {
+  presetLlamaSelect.addEventListener("change", () => {
+    if (presetLlamaSelect.value && presetLlamaInput) {
+      presetLlamaInput.value = presetLlamaSelect.value;
+    }
+  });
 }
 if (presetScanModelsBtn) {
   presetScanModelsBtn.addEventListener("click", () => {
@@ -5278,6 +6002,7 @@ if (presetAddBtn) {
       presetBackendSelect.value = "llama-server";
     }
     updatePresetFormVisibility();
+    loadPresetOptions();
     setLoadingMode("setup");
     loadingStatusText.textContent = "Создайте новый пресет.";
   });
@@ -5391,7 +6116,144 @@ if (settingsToggleBtn) {
   settingsToggleBtn.addEventListener("click", () => {
     renderToolsList();
     refreshTelegramAccountStatus();
+    loadSystemPrompts();
+    refreshRemoteState();
     setSettingsDrawerOpen(true);
+  });
+}
+
+let remotePairCountdownTimer = null;
+
+async function refreshRemoteState() {
+  try {
+    const response = await fetch("/api/remote/state", { cache: "no-store" });
+    const data = await response.json();
+    if (!response.ok || !data.ok) return;
+    const remoteOption = [...(executionTargetSelect?.options || [])].find((option) => option.value === "remote");
+    if (data.connected) {
+      if (!remoteOption && executionTargetSelect) {
+        const option = document.createElement("option");
+        option.value = "remote";
+        const addOption = [...executionTargetSelect.options].find((entry) => entry.value === "add");
+        executionTargetSelect.insertBefore(option, addOption || null);
+      }
+      const option = [...executionTargetSelect.options].find((entry) => entry.value === "remote");
+      if (option) option.textContent = data.device_name || "Подключённый Jarvis";
+      const hostClients = Array.isArray(data.paired_clients) && data.paired_clients.length
+        ? ` · Подключены к этому Jarvis: ${data.paired_clients.join(", ")}` : "";
+      if (remoteDeviceStatus) remoteDeviceStatus.textContent = `Подключено к ${data.device_name || "Jarvis"}. Доступны его модель и инструменты.${hostClients}`;
+      remotePairDisconnectBtn?.classList.remove("hidden");
+    } else {
+      remoteOption?.remove();
+      if (executionTargetSelect?.value === "remote") executionTargetSelect.value = "local";
+      if (remoteDeviceStatus) {
+        remoteDeviceStatus.textContent = data.paired_clients?.length
+          ? `К этому Jarvis подключены: ${data.paired_clients.join(", ")}`
+          : "Устройство не подключено";
+      }
+      remotePairDisconnectBtn?.classList.add("hidden");
+    }
+    if (executionTargetStatus) {
+      executionTargetStatus.textContent = executionTargetSelect?.value === "remote"
+        ? `Удалённо · ${data.device_name || "Jarvis"}`
+        : "Локальная модель";
+    }
+  } catch (error) {
+    if (remoteDeviceStatus) remoteDeviceStatus.textContent = `Не удалось проверить подключение: ${error.message}`;
+  }
+}
+
+refreshRemoteState();
+
+if (executionTargetSelect) {
+  executionTargetSelect.addEventListener("change", () => {
+    if (executionTargetSelect.value === "add") {
+      executionTargetSelect.value = "local";
+      setSettingsDrawerOpen(true);
+      document.querySelector(".remote-device-panel")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      remotePairHostInput?.focus({ preventScroll: true });
+      return;
+    }
+    if (executionTargetStatus) {
+      const option = executionTargetSelect.selectedOptions[0];
+      executionTargetStatus.textContent = executionTargetSelect.value === "remote"
+        ? `Удалённо · ${option?.textContent || "Jarvis"}`
+        : "Локальная модель";
+    }
+    document.body.classList.toggle("remote-working", isGeneratingResponse && executionTargetSelect.value === "remote");
+    if (executionTargetSelect.value === "remote") stopContextRefreshTimer();
+    else if (isGeneratingResponse) startContextRefreshTimer();
+  });
+}
+
+if (remotePairStartBtn) {
+  remotePairStartBtn.addEventListener("click", async () => {
+    remotePairStartBtn.disabled = true;
+    remotePairStartBtn.textContent = "Создаю код…";
+    try {
+      const response = await fetch("/api/remote/pair/start", { method: "POST" });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.detail || "Не удалось создать код");
+      if (remotePairAddress) remotePairAddress.textContent = `Адрес: ${data.address}`;
+      if (remotePairCode) remotePairCode.textContent = data.code;
+      remotePairCodeWrap?.classList.remove("hidden");
+      let remaining = Number(data.expires_in) || 180;
+      clearInterval(remotePairCountdownTimer);
+      const tick = () => {
+        if (remotePairCountdown) remotePairCountdown.textContent = `Код действует ещё ${remaining} сек.`;
+        remaining -= 1;
+        if (remaining < 0) {
+          clearInterval(remotePairCountdownTimer);
+          remotePairCodeWrap?.classList.add("hidden");
+        }
+      };
+      tick();
+      remotePairCountdownTimer = setInterval(tick, 1000);
+    } catch (error) {
+      if (remoteDeviceStatus) remoteDeviceStatus.textContent = error.message;
+    } finally {
+      remotePairStartBtn.disabled = false;
+      remotePairStartBtn.textContent = "Показать код подключения";
+    }
+  });
+}
+
+if (remotePairConnectForm) {
+  remotePairConnectForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    remotePairConnectBtn.disabled = true;
+    remotePairConnectBtn.textContent = "Подключаю…";
+    if (remoteDeviceStatus) remoteDeviceStatus.textContent = "Выполняю сопряжение…";
+    try {
+      const response = await fetch("/api/remote/pair/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ host: remotePairHostInput.value.trim(), code: remotePairCodeInput.value.trim() }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.detail || "Не удалось подключиться");
+      remotePairCodeInput.value = "";
+      await refreshRemoteState();
+      if (executionTargetSelect) executionTargetSelect.value = "remote";
+      executionTargetSelect?.dispatchEvent(new Event("change"));
+      if (remoteDeviceStatus) remoteDeviceStatus.textContent = `Подключено к ${data.device_name}. Jarvis получил полный доступ к этому устройству.`;
+    } catch (error) {
+      if (remoteDeviceStatus) remoteDeviceStatus.textContent = error.message;
+    } finally {
+      remotePairConnectBtn.disabled = false;
+      remotePairConnectBtn.textContent = "Подключить Jarvis";
+    }
+  });
+}
+
+if (remotePairDisconnectBtn) {
+  remotePairDisconnectBtn.addEventListener("click", async () => {
+    try {
+      await fetch("/api/remote/pair", { method: "DELETE" });
+      await refreshRemoteState();
+    } catch (error) {
+      if (remoteDeviceStatus) remoteDeviceStatus.textContent = `Не удалось отключить устройство: ${error.message}`;
+    }
   });
 }
 if (settingsCloseBtn) {
@@ -5408,6 +6270,9 @@ window.addEventListener("keydown", (event) => {
     }
     if (telegramSetupModal && !telegramSetupModal.classList.contains("hidden")) {
       setTelegramSetupModalOpen(false);
+    }
+    if (systemPromptModal && !systemPromptModal.classList.contains("hidden")) {
+      setSystemPromptModalOpen(false);
     }
   }
 });
@@ -5557,6 +6422,61 @@ async function saveTelegramSession() {
     showTelegramSetupError(telegram2faError, error.message);
   }
 }
+async function startUsualMode(status) {
+  if (!status) {
+    status = await loadConfigStatus();
+  }
+  if (status?.needs_setup) {
+    loadingScreen?.classList.remove("hidden");
+    setLoadingMode("setup");
+    if (startupSubtitle) startupSubtitle.textContent = "Сначала настройте пресет модели";
+    loadingStatusText.textContent = "Укажите сервер и модель, чтобы начать работу.";
+    return;
+  }
+  if (startupSubtitle) startupSubtitle.textContent = "Подготавливаю рабочее пространство…";
+  loadingStatusText.textContent = "Загружаю список моделей…";
+  loadingScreen?.classList.remove("hidden");
+  await loadModels();
+  loadingStatusText.textContent = "Восстанавливаю чаты и настройки…";
+  await loadAsrBackends();
+  await loadChats();
+  await pollVoiceState();
+  await loadToolsCatalog();
+  loadingStatusText.textContent = "Подготавливаю инструменты и проверяю сервер…";
+  await refreshBackgroundTasks();
+  await refreshActivePlan();
+  await refreshTelegramAccountStatus();
+  renderPresetCards();
+  renderToolsList();
+  setLoadingMode("launch");
+  if (startupSubtitle) startupSubtitle.textContent = "Выберите модель и запустите Jarvis";
+  checkForUpdate();
+  checkLlamaServerUpdate();
+  const isOnline = await refreshHealth();
+  if (isOnline) {
+    await enterMainInterface();
+    if (currentChatId) await openChat(currentChatId);
+    else clearChatLog();
+    runSystemCheck();
+  } else {
+    loadingScreen?.classList.remove("hidden");
+    document.querySelector(".shell")?.classList.add("hidden");
+    runSystemCheck();
+    loadingStatusText.textContent = "Выберите пресет и запустите llama-server.";
+  }
+}
+
+if (modelBootRetryBtn) modelBootRetryBtn.addEventListener("click", startModelFromLoadingScreen);
+if (modelBootBackBtn) {
+  modelBootBackBtn.addEventListener("click", () => {
+    modelBootScreen?.classList.add("hidden");
+    modelBootScreen?.classList.remove("is-error", "is-ready");
+    loadingScreen?.classList.remove("is-model-booting");
+    if (loadingStartBtn) loadingStartBtn.disabled = false;
+    if (loadingStatusText) loadingStatusText.textContent = "Выберите модель и запустите Jarvis.";
+  });
+}
+
 if (ttsToggle) {
   ttsToggle.addEventListener("change", () => updateTtsSetting(ttsToggle.checked));
 }
@@ -5623,58 +6543,18 @@ if (pastePreview) {
 // === Инициализация при загрузке ===
 async function initApp() {
   try {
+    if (startupSubtitle) startupSubtitle.textContent = "Запускаю рабочее пространство Jarvis…";
+    if (loadingStatusText) loadingStatusText.textContent = "Читаю настройки и ищу пресеты…";
     const status = await loadConfigStatus();
     fillPresetSetupDefaults(status);
     updatePresetFormVisibility();
     loadLocalModels();
-
-    if (status.needs_setup) {
-      loadingScreen?.classList.remove("hidden");
-      document.querySelector(".shell")?.classList.add("hidden");
-      setLoadingMode("setup");
-      loadingStatusText.textContent = "Создайте первый пресет, чтобы начать работу.";
-      return;
-    }
-
-    await loadModels();
-      await loadAsrBackends();
-      await loadChats();
-      await pollVoiceState();
-      await loadToolsCatalog();
-      await refreshBackgroundTasks();
-      await refreshActivePlan();
-      await refreshTelegramAccountStatus();
-    renderPresetCards();
-    renderToolsList();
-    setLoadingMode("launch");
-
-    // Check for updates from GitHub after the UI is ready.
-    checkForUpdate();
-
-    const isOnline = await refreshHealth();
-
-    if (isOnline) {
-      loadingScreen?.classList.add("hidden");
-      document.querySelector(".shell")?.classList.remove("hidden");
-      if (currentChatId) {
-        await openChat(currentChatId);
-      } else {
-        clearChatLog();
-      }
-      await refreshContext();
-      setLiveStatus("Готов к работе", false);
-      syncEmptyChatState();
-      runSystemCheck();
-    } else {
-      loadingScreen?.classList.remove("hidden");
-      document.querySelector(".shell")?.classList.add("hidden");
-      runSystemCheck();
-      loadingStatusText.textContent = "Выберите пресет и запустите llama-server.";
-    }
+    await startUsualMode(status);
   } catch (error) {
     loadingScreen?.classList.remove("hidden");
     document.querySelector(".shell")?.classList.add("hidden");
     setLoadingMode(configCache?.needs_setup ? "setup" : "launch");
+    if (startupSubtitle) startupSubtitle.textContent = "Не удалось подготовить Jarvis";
     loadingStatusText.textContent = `Ошибка инициализации: ${error.message}`;
   }
 }

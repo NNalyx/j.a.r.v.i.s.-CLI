@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import sys
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -43,6 +44,21 @@ DEFAULT_LLAMA_SERVER_PATHS = [
     r"C:\llama_server_new\llama-server.exe",
     r"C:\llama.cpp\llama-server.exe",
     r".\llama-server.exe",
+    os.path.join(BASE_DIR, "bin", "llama-server"),
+    os.path.join(BASE_DIR, "bin", "llama-server.exe"),
+    os.path.join(Path.home(), "llama.cpp", "build", "bin", "llama-server"),
+    os.path.join(Path.home(), "llama.cpp", "build", "bin", "llama-server.exe"),
+    "/opt/homebrew/bin/llama-server",
+    "/usr/local/bin/llama-server",
+]
+
+DEFAULT_GGUF_MODEL_ROOTS = [
+    os.path.join(BASE_DIR, "models"),
+    os.path.join(Path.home(), "models"),
+    os.path.join(Path.home(), "Downloads"),
+    os.path.join(Path.home(), "Documents"),
+    os.path.join(Path.home(), ".cache", "huggingface", "hub"),
+    os.path.join(Path.home(), "Library", "Application Support", "LM Studio", "models"),
 ]
 
 DEFAULT_MLX_MODEL_ROOTS = [
@@ -67,12 +83,103 @@ DEFAULT_VOSK_LARGE_PATHS = [
 
 
 def find_llama_server():
-    """Автоматический поиск llama-server.exe в стандартных путях."""
+    """Автоматический поиск llama-server на Windows и macOS/Linux."""
+    # Сначала используем путь из уже сохранённого пресета: он может находиться
+    # в нестандартной папке, которую невозможно угадать по системным путям.
+    try:
+        saved_config = read_config()
+        for preset in (saved_config or {}).get("presets", []):
+            saved_path = normalize_path(preset.get("llama_server_path", ""), allow_empty=True)
+            if saved_path and os.path.isfile(saved_path):
+                return saved_path
+    except Exception:
+        pass
+
+    for command in ("llama-server", "llama-server.exe"):
+        found = shutil.which(command)
+        if found:
+            return os.path.abspath(found)
     for path in DEFAULT_LLAMA_SERVER_PATHS:
         abs_path = os.path.abspath(path)
-        if os.path.exists(abs_path):
+        if os.path.isfile(abs_path) and os.access(abs_path, os.X_OK):
             return abs_path
     return ""
+
+
+def find_prism_llama_server() -> str:
+    """Найти Prism-сборку llama.cpp для специальных Bonsai PQ/PTQ GGUF."""
+    candidates = [
+        os.path.join(BASE_DIR, "..", "llama.cpp-prism", "build", "bin", "llama-server"),
+        os.path.join(Path.home(), "PycharmProjects", "llama.cpp-prism", "build", "bin", "llama-server"),
+        os.path.join(Path.home(), "llama.cpp-prism", "build", "bin", "llama-server"),
+    ]
+    for candidate in candidates:
+        resolved = os.path.abspath(candidate)
+        if os.path.isfile(resolved) and os.access(resolved, os.X_OK):
+            return resolved
+    return ""
+
+
+def is_prism_model(model_path: str) -> bool:
+    """Определить GGUF-форматы Bonsai 2, несовместимые со stock llama.cpp."""
+    name = os.path.basename(str(model_path or "")).lower()
+    return (
+        "ternary-bonsai-2" in name
+        or "pq2_0" in name
+        or "ptq1_0" in name
+    )
+
+
+def discover_gguf_models(extra_roots: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    """Найти локальные GGUF-файлы для llama-server пресетов."""
+    roots = list(DEFAULT_GGUF_MODEL_ROOTS)
+    for raw in extra_roots or []:
+        roots.append(os.path.expanduser(str(raw)))
+
+    found: Dict[str, Dict[str, Any]] = {}
+    skip_dirs = {".git", "venv", "node_modules", "__pycache__", ".venv"}
+    for raw_root in roots:
+        root = Path(os.path.expanduser(raw_root))
+        if not root.is_dir():
+            continue
+        try:
+            for current, dirs, files in os.walk(root):
+                current_path = Path(current)
+                try:
+                    depth = len(current_path.relative_to(root).parts)
+                except ValueError:
+                    continue
+                if depth >= 5:
+                    dirs[:] = []
+                else:
+                    dirs[:] = [d for d in dirs if d not in skip_dirs and not d.startswith(".")]
+                for filename in files:
+                    if not filename.lower().endswith(".gguf"):
+                        continue
+                    path = (current_path / filename).resolve()
+                    key = str(path)
+                    if key in found:
+                        continue
+                    lower_name = filename.lower()
+                    role = "model"
+                    if "mmproj" in lower_name:
+                        role = "mmproj"
+                    elif "mtp" in lower_name or "draft" in lower_name:
+                        role = "mtp"
+                    try:
+                        size = path.stat().st_size
+                    except OSError:
+                        size = 0
+                    found[key] = {
+                        "path": key,
+                        "name": filename,
+                        "role": role,
+                        "size": size,
+                    }
+        except OSError:
+            continue
+
+    return sorted(found.values(), key=lambda item: (item["role"] != "model", item["name"].lower()))
 
 
 def find_vosk_small_model():
@@ -406,6 +513,10 @@ def presets_to_runtime(config: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, 
             llama_server_path = resolve_llama_server_executable(llama_server_path)
         except ValueError:
             llama_server_path = normalize_path(llama_server_path)
+        if is_prism_model(preset.get("model_path", "")):
+            prism_server = find_prism_llama_server()
+            if prism_server:
+                llama_server_path = prism_server
         args = [
             llama_server_path,
             "-m", preset["model_path"],
@@ -416,13 +527,17 @@ def presets_to_runtime(config: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, 
         ]
         if preset.get("mmproj_path"):
             args.extend(["--mmproj", preset["mmproj_path"]])
-        if preset.get("mtp_enabled") and not preset.get("mtp_path"):
+        # Bonsai 2 PQ2/PTQ GGUF содержит специальные Prism-тензоры, но не
+        # содержит MTP-слоёв. Prism-сервер запускает такую модель только без
+        # speculative MTP-флагов.
+        prism_model = is_prism_model(preset.get("model_path", ""))
+        if preset.get("mtp_enabled") and not preset.get("mtp_path") and not prism_model:
             # Встроенный MTP (Qwen3.6 и аналогичные): draft-модель не нужна
             args.extend([
                 "--spec-type", "draft-mtp",
                 "--spec-draft-n-max", str(int(preset.get("mtp_n_max", 2))),
             ])
-        elif preset.get("mtp_path"):
+        elif preset.get("mtp_path") and not prism_model:
             args.extend([
                 "--model-draft", preset["mtp_path"],
                 "--spec-type", "draft-mtp",
@@ -838,6 +953,156 @@ def update_preset_tools(index: int, enabled_tools: List[str]) -> Dict[str, Any]:
     ]
     write_config(config)
     return get_config_status()
+
+
+DEFAULT_SYSTEM_PROMPT_ID = "default"
+
+
+def _system_prompt_settings(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Нормализованный блок системных промтов из конфигурации."""
+    raw = config.get("system_prompts")
+    if not isinstance(raw, dict):
+        raw = {}
+    items = raw.get("items")
+    if not isinstance(items, list):
+        items = []
+    normalized_items = []
+    for entry in items:
+        if not isinstance(entry, dict):
+            continue
+        profile_id = str(entry.get("id") or "").strip()
+        name = str(entry.get("name") or "").strip()
+        content = str(entry.get("content") or "")
+        if not profile_id or not name or not content.strip():
+            continue
+        normalized_items.append({"id": profile_id, "name": name, "content": content})
+    active = str(raw.get("active") or DEFAULT_SYSTEM_PROMPT_ID).strip()
+    if active != DEFAULT_SYSTEM_PROMPT_ID and not any(item["id"] == active for item in normalized_items):
+        active = DEFAULT_SYSTEM_PROMPT_ID
+    return {"active": active, "items": normalized_items}
+
+
+def list_system_prompt_profiles() -> Dict[str, Any]:
+    """Список профилей без содержимого + активный id.
+
+    Содержимое стандартного (встроенного) промта наружу не отдаётся.
+    """
+    config = read_config() or {}
+    settings = _system_prompt_settings(config)
+    profiles = [{
+        "id": DEFAULT_SYSTEM_PROMPT_ID,
+        "name": "Стандартный",
+        "is_default": True,
+        "is_active": settings["active"] == DEFAULT_SYSTEM_PROMPT_ID,
+    }]
+    profiles.extend({
+        "id": item["id"],
+        "name": item["name"],
+        "is_default": False,
+        "is_active": item["id"] == settings["active"],
+    } for item in settings["items"])
+    return {"active": settings["active"], "profiles": profiles}
+
+
+def get_custom_system_prompt_content(profile_id: str) -> str:
+    """Содержимое кастомного профиля. Стандартный профиль не раскрывается."""
+    profile_id = str(profile_id or "").strip()
+    if not profile_id or profile_id == DEFAULT_SYSTEM_PROMPT_ID:
+        raise ValueError("Содержимое стандартного промта недоступно")
+    config = read_config() or {}
+    settings = _system_prompt_settings(config)
+    for item in settings["items"]:
+        if item["id"] == profile_id:
+            return item["content"]
+    raise ValueError("Профиль не найден")
+
+
+def get_active_custom_system_prompt() -> str:
+    """Содержимое активного кастомного промта или пустая строка (стандартный)."""
+    try:
+        config = read_config() or {}
+    except Exception:
+        return ""
+    settings = _system_prompt_settings(config)
+    if settings["active"] == DEFAULT_SYSTEM_PROMPT_ID:
+        return ""
+    for item in settings["items"]:
+        if item["id"] == settings["active"]:
+            return item["content"]
+    return ""
+
+
+def _save_system_prompt_settings(settings: Dict[str, Any]) -> None:
+    config = read_config() or default_config()
+    config["system_prompts"] = settings
+    write_config(config)
+
+
+def create_system_prompt_profile(name: str, content: str) -> Dict[str, Any]:
+    name = str(name or "").strip()
+    content = str(content or "")
+    if not name:
+        raise ValueError("Введите название промта")
+    if not content.strip():
+        raise ValueError("Промт не может быть пустым")
+    if len(content) > 200_000:
+        raise ValueError("Промт слишком длинный (максимум 200000 символов)")
+
+    config = read_config() or {}
+    settings = _system_prompt_settings(config)
+    profile_id = uuid.uuid4().hex[:12]
+    settings["items"].append({"id": profile_id, "name": name, "content": content})
+    _save_system_prompt_settings(settings)
+    return list_system_prompt_profiles()
+
+
+def update_system_prompt_profile(profile_id: str, name: Optional[str] = None, content: Optional[str] = None) -> Dict[str, Any]:
+    profile_id = str(profile_id or "").strip()
+    config = read_config() or {}
+    settings = _system_prompt_settings(config)
+    for item in settings["items"]:
+        if item["id"] != profile_id:
+            continue
+        if name is not None:
+            name = str(name).strip()
+            if not name:
+                raise ValueError("Введите название промта")
+            item["name"] = name
+        if content is not None:
+            content = str(content)
+            if not content.strip():
+                raise ValueError("Промт не может быть пустым")
+            if len(content) > 200_000:
+                raise ValueError("Промт слишком длинный (максимум 200000 символов)")
+            item["content"] = content
+        _save_system_prompt_settings(settings)
+        return list_system_prompt_profiles()
+    raise ValueError("Профиль не найден")
+
+
+def delete_system_prompt_profile(profile_id: str) -> Dict[str, Any]:
+    profile_id = str(profile_id or "").strip()
+    config = read_config() or {}
+    settings = _system_prompt_settings(config)
+    items = [item for item in settings["items"] if item["id"] != profile_id]
+    if len(items) == len(settings["items"]):
+        raise ValueError("Профиль не найден")
+    settings["items"] = items
+    if settings["active"] == profile_id:
+        settings["active"] = DEFAULT_SYSTEM_PROMPT_ID
+    _save_system_prompt_settings(settings)
+    return list_system_prompt_profiles()
+
+
+def set_active_system_prompt_profile(profile_id: str) -> Dict[str, Any]:
+    profile_id = str(profile_id or "").strip()
+    config = read_config() or {}
+    settings = _system_prompt_settings(config)
+    if profile_id != DEFAULT_SYSTEM_PROMPT_ID and not any(item["id"] == profile_id for item in settings["items"]):
+        raise ValueError("Профиль не найден")
+    settings["active"] = profile_id
+    _save_system_prompt_settings(settings)
+    return list_system_prompt_profiles()
 
 
 def setup_wizard():

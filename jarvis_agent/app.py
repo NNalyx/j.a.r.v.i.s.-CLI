@@ -582,7 +582,7 @@ class QwenAgentApp:
                     return self.selected_model_key
             print(f"{Colors.YELLOW}Введите корректный номер модели.{Colors.RESET}")
 
-    def _launch_llama_server_process(self, model_key: Optional[str] = None) -> str:
+    def _launch_llama_server_process(self, model_key: Optional[str] = None, progress_callback=None) -> str:
         """Запустить LLM-сервер (llama-server или MLX) с указанным пресетом.
 
         Вывод сервера пишется в `llama_server.log` в корне проекта, а само
@@ -614,6 +614,11 @@ class QwenAgentApp:
 
         executable = args[0]
         is_mlx = backend in ("mlx-vlm", "mlx-optiq", "mtplx")
+        if progress_callback:
+            try:
+                progress_callback("starting", f"Запускаю сервер для пресета «{preset['label']}»…")
+            except Exception:
+                pass
         if not is_mlx and not os.path.exists(executable):
             raise FileNotFoundError(
                 f"Сервер не найден по пути: {executable}\n"
@@ -654,6 +659,13 @@ class QwenAgentApp:
             self._last_llama_server_process = process
         finally:
             log_file.close()
+
+        if progress_callback:
+            memory_name = "объединённую память" if sys.platform == "darwin" else "оперативную память"
+            try:
+                progress_callback("loading", f"Сервер запущен. Загружаю модель в {memory_name}…")
+            except Exception:
+                pass
 
         # MLX/MTPLX-серверу нужно больше времени на загрузку модели.
         if backend == "mtplx":
@@ -726,9 +738,16 @@ class QwenAgentApp:
             cleaned.append(arg)
         return cleaned
 
-    def start_selected_llama_server(self, model_key: Optional[str] = None) -> bool:
+    def start_selected_llama_server(self, model_key: Optional[str] = None, progress_callback=None) -> bool:
         """Запустить выбранный preset llama-server и дождаться health-check."""
         UI.print_status("Сервер не найден. Запускаю llama-сервер...", "loading")
+
+        def report(phase: str, message: str) -> None:
+            if progress_callback:
+                try:
+                    progress_callback(phase, message)
+                except Exception:
+                    pass
 
         try:
             if model_key:
@@ -736,9 +755,10 @@ class QwenAgentApp:
             else:
                 model_key = self._choose_model_preset()
 
-            model_label = self._launch_llama_server_process(model_key)
+            model_label = self._launch_llama_server_process(model_key, progress_callback=report)
             UI.print_status(f"Выбрана модель: {model_label}", "info")
             UI.print_status("Запуск сервера (может занять до 300 сек)...", "loading")
+            report("checking", "Жду, пока сервер завершит загрузку и начнёт отвечать…")
 
             for i in range(300, 0, -1):
                 print(f"\r{Colors.BRIGHT_CYAN}⟳ Ожидание запуска: {i} сек...{Colors.RESET}", end="")
@@ -747,6 +767,7 @@ class QwenAgentApp:
                 if self.agent.check_health():
                     print()
                     UI.print_status("Сервер запущен и доступен!", "success")
+                    report("ready", f"Модель «{model_label}» готова к работе.")
                     return True
 
                 # Если процесс упал во время ожидания — не ждать 30 секунд,
@@ -759,19 +780,23 @@ class QwenAgentApp:
                     )
                     log_path = os.path.normpath(log_path)
                     log_tail = self._read_llama_server_log_tail(log_path)
-                    UI.print_error(
+                    error_message = (
                         f"Сервер завершился при запуске (код {process.poll()}).\n"
                         f"Последние строки лога ({log_path}):\n{log_tail}"
                     )
+                    UI.print_error(error_message)
+                    report("error", error_message)
                     return False
 
                 time.sleep(1)
 
             print()
             UI.print_error("Таймаут ожидания сервера")
+            report("error", "Сервер не ответил за 300 секунд. Проверьте лог запуска.")
             return False
         except Exception as e:
             UI.print_error(f"Не удалось запустить сервер: {e}")
+            report("error", f"Не удалось запустить сервер: {e}")
             return False
 
     def _start_llama_server(self):

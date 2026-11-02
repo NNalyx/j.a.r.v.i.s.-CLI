@@ -16,7 +16,7 @@ class TTS:
     _ref_audio_path = None  # Сохранено для совместимости старого API
     _ref_text = ""
     _volume = 1.0
-    _speed = 1.0  # Скорость речи (0.5-2.0) - пока не поддерживается Supertonic
+    _speed = 1.15  # Более быстрая речь; передаётся в Supertonic
     _voice_name = "F1"
     _voice_style_path = None
 
@@ -102,7 +102,7 @@ class TTS:
 
     @classmethod
     def set_speed(cls, speed: float):
-        """Установить скорость речи (0.5-2.0) - зарезервировано для будущего использования"""
+        """Установить скорость речи (0.5-2.0)."""
         cls._speed = max(0.5, min(2.0, speed))
 
     @classmethod
@@ -193,4 +193,3 @@ class TTS:
 
         # Озвучиваем объединённый текст
         return cls.speak(combined_text)
-

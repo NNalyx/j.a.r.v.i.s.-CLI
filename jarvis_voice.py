@@ -8,7 +8,9 @@
 
 import os
 import json
+import sys
 import threading
+import tempfile
 import time
 import numpy as np
 from typing import Any, Callable, Dict, List, Optional
@@ -37,6 +39,20 @@ except ImportError:
     TORCH_AVAILABLE = False
 
 try:
+    from transformers import AutoModel
+    TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    AutoModel = None
+    TRANSFORMERS_AVAILABLE = False
+
+try:
+    import soundfile as sf
+    SOUNDFILE_AVAILABLE = True
+except ImportError:
+    sf = None
+    SOUNDFILE_AVAILABLE = False
+
+try:
     from silero import silero_stt
     STT_AVAILABLE = TORCH_AVAILABLE
 except ImportError:
@@ -49,16 +65,26 @@ try:
 except ImportError:
     VOSK_AVAILABLE = False
 
-# URL для загрузки модели Vosk (маленькая русская модель ~35MB)
+# Legacy Vosk constants are kept only for config/API compatibility.
 VOSK_MODEL_URL = "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"
-VOSK_MODEL_NAME = "vosk-model-small-ru-0.22"
+VOSK_MODEL_NAME = ""
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VOSK_SMALL_MODEL_PATH = os.path.join(_BASE_DIR, "models", "vosk-model-small-ru-0.22")
 VOSK_LARGE_MODEL_PATH = os.path.join(_BASE_DIR, "models", "vosk-model-ru-0.42")
-DEFAULT_TRANSCRIPTION_BACKEND_KEY = "vosk"
-LARGE_VOSK_TRANSCRIPTION_BACKEND_KEY = "vosk_large"
+GIGAAM_TRANSCRIPTION_BACKEND_KEY = "gigaam"
+GIGAAM_MODEL_PATH = os.path.join(_BASE_DIR, "models", "GigaAM-Multilingual-ctc")
+DEFAULT_TRANSCRIPTION_BACKEND_KEY = GIGAAM_TRANSCRIPTION_BACKEND_KEY
+# Compatibility alias used by older Jarvis API code.
+LARGE_VOSK_TRANSCRIPTION_BACKEND_KEY = GIGAAM_TRANSCRIPTION_BACKEND_KEY
 LEGACY_FASTER_WHISPER_TRANSCRIPTION_BACKEND_KEY = "faster_whisper"
 LEGACY_QWEN_TRANSCRIPTION_BACKEND_KEY = "qwen3_asr"
+
+# Один общий экземпляр GigaAM для wake word и ручной записи. Без этого
+# кнопка записи создавала второй VoiceActivator и повторно грузила ~800 MB.
+_GIGAAM_SHARED_MODEL = None
+_GIGAAM_SHARED_DEVICE = ""
+_GIGAAM_SHARED_MODEL_LOCK = threading.Lock()
+_AUDIO_STREAM_LOCK = threading.Lock()
 
 # Импорт цветов из основного модуля
 try:
@@ -86,15 +112,83 @@ except ImportError:
     MIC_AVAILABLE = False
 
 
+def _preferred_input_device() -> Optional[int]:
+    """Выбрать системный входной микрофон, затем доступный вход как fallback."""
+    if not MIC_AVAILABLE:
+        return None
+    try:
+        devices = sd.query_devices()
+        try:
+            default_input = int(sd.default.device[0])
+        except (TypeError, ValueError, IndexError):
+            default_input = -1
+
+        if 0 <= default_input < len(devices):
+            info = devices[default_input]
+            if int(info.get("max_input_channels", 0)) > 0:
+                print(f"[Voice] 🎙️ Используется системный микрофон: {info.get('name', default_input)}")
+                return default_input
+
+        input_devices = [
+            (index, info) for index, info in enumerate(devices)
+            if int(info.get("max_input_channels", 0)) > 0
+        ]
+        if sys.platform == "darwin":
+            for index, info in input_devices:
+                name = str(info.get("name", "")).lower()
+                if any(marker in name for marker in ("built-in microphone", "macbook", "встроенн")):
+                    print(f"[Voice] 🎙️ Используется встроенный микрофон: {info.get('name', index)}")
+                    return index
+        if input_devices:
+            index, info = input_devices[0]
+            print(f"[Voice] 🎙️ Используется доступный микрофон: {info.get('name', index)}")
+            return index
+    except Exception:
+        pass
+    return None
+
+
+def _open_input_stream_with_retry():
+    """Открыть микрофон с повтором после временной ошибки AUHAL."""
+    last_error = None
+    input_device = _preferred_input_device()
+    if input_device is None:
+        raise RuntimeError("Не найден доступный входной микрофон")
+    for attempt in range(3):
+        stream = None
+        try:
+            stream = sd.InputStream(
+                samplerate=SAMPLE_RATE,
+                channels=1,
+                blocksize=CHUNK_SIZE,
+                dtype="float32",
+                device=input_device,
+            )
+            stream.start()
+            return stream
+        except Exception as exc:
+            last_error = exc
+            if stream is not None:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
+            if attempt < 2:
+                print(f"[Voice] ⚠️ Не удалось открыть микрофон, повторяю ({attempt + 1}/2)...")
+                time.sleep(0.8)
+    raise last_error
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Константы
 # ─────────────────────────────────────────────────────────────────────────────
 SAMPLE_RATE = 16000  # Частота дискретизации
 CHUNK_SIZE = 512     # Размер чанка для записи (~32ms при 16kHz)
 DURATION_WAKE_WORD = 1.5  # Секунд для записи wake word
-SILENCE_THRESHOLD = 0.001  # Порог тишины для VAD (очень низкий для чувствительности)
-SILENCE_DURATION = 0.5    # Секунд тишины для окончания записи команды (было 1.0)
+SILENCE_THRESHOLD = 0.0025  # Минимальный порог; дальше добавляется адаптация к шуму комнаты
+SILENCE_DURATION = 0.35    # Короткая пауза, чтобы wake word не ждал лишнее время
 POST_COMMAND_COOLDOWN = 1.8  # Защита от повторного ложного wake-trigger на хвосте той же фразы
+GIGAAM_MAX_SHORT_AUDIO_SECONDS = 24.0  # Внутренний лимит ниже ограничения модели в 25 секунд
 
 # Wake word для распознавания через Vosk
 WAKE_WORD = "пятница"
@@ -130,9 +224,15 @@ def _get_vosk_large_path() -> str:
 
 def _normalize_backend_key(backend_key: Optional[str]) -> str:
     normalized = str(backend_key or DEFAULT_TRANSCRIPTION_BACKEND_KEY).strip().lower()
-    if normalized in {LEGACY_QWEN_TRANSCRIPTION_BACKEND_KEY, LEGACY_FASTER_WHISPER_TRANSCRIPTION_BACKEND_KEY}:
-        return LARGE_VOSK_TRANSCRIPTION_BACKEND_KEY
-    return normalized if normalized in {DEFAULT_TRANSCRIPTION_BACKEND_KEY, LARGE_VOSK_TRANSCRIPTION_BACKEND_KEY} else DEFAULT_TRANSCRIPTION_BACKEND_KEY
+    if normalized in {
+        "vosk",
+        "vosk_large",
+        LEGACY_QWEN_TRANSCRIPTION_BACKEND_KEY,
+        LEGACY_FASTER_WHISPER_TRANSCRIPTION_BACKEND_KEY,
+        GIGAAM_TRANSCRIPTION_BACKEND_KEY,
+    }:
+        return GIGAAM_TRANSCRIPTION_BACKEND_KEY
+    return GIGAAM_TRANSCRIPTION_BACKEND_KEY
 
 
 def _supports_large_vosk() -> tuple[bool, str]:
@@ -143,6 +243,18 @@ def _supports_large_vosk() -> tuple[bool, str]:
     large_path = _get_vosk_large_path()
     if not os.path.exists(large_path):
         return False, f"Большая модель Vosk не найдена: {large_path}"
+    return True, ""
+
+
+def _supports_gigaam() -> tuple[bool, str]:
+    if not MIC_AVAILABLE:
+        return False, "Микрофон недоступен"
+    if not TORCH_AVAILABLE or not TRANSFORMERS_AVAILABLE:
+        return False, "Для GigaAM нужны torch и transformers"
+    if not SOUNDFILE_AVAILABLE:
+        return False, "Для GigaAM нужен пакет soundfile"
+    if not os.path.isfile(os.path.join(GIGAAM_MODEL_PATH, "pytorch_model.bin")):
+        return False, f"Веса GigaAM не найдены: {GIGAAM_MODEL_PATH}"
     return True, ""
 
 
@@ -158,30 +270,17 @@ def _check_free_ram_gb() -> Optional[float]:
 
 def get_transcription_backend_catalog(selected_key: Optional[str] = None) -> List[Dict[str, Any]]:
     selected_key = _normalize_backend_key(selected_key)
-    large_vosk_available, large_vosk_reason = _supports_large_vosk()
-    backends = [
-        {
-            "key": DEFAULT_TRANSCRIPTION_BACKEND_KEY,
-            "label": "Vosk Small RU",
-            "description": "Лёгкая и быстрая потоковая расшифровка, но менее точная.",
-            "available": bool(MIC_AVAILABLE and VOSK_AVAILABLE),
-            "requires_cuda": False,
-            "streaming": True,
-            "selected": selected_key == DEFAULT_TRANSCRIPTION_BACKEND_KEY,
-            "reason": "" if (MIC_AVAILABLE and VOSK_AVAILABLE) else "Vosk или sounddevice недоступны",
-        },
-        {
-            "key": LARGE_VOSK_TRANSCRIPTION_BACKEND_KEY,
-            "label": "Vosk Large RU 0.42",
-            "description": "Большая русская модель Vosk для распознавания команды. Работает по тому же потоковому принципу, но точнее и тяжелее.",
-            "available": large_vosk_available,
-            "requires_cuda": False,
-            "streaming": True,
-            "selected": selected_key == LARGE_VOSK_TRANSCRIPTION_BACKEND_KEY,
-            "reason": large_vosk_reason,
-        },
-    ]
-    return backends
+    gigaam_available, gigaam_reason = _supports_gigaam()
+    return [{
+        "key": GIGAAM_TRANSCRIPTION_BACKEND_KEY,
+        "label": "GigaAM Multilingual",
+        "description": "Локальное распознавание речи на русском и ещё 4 языках. Модель CTC, 220M параметров.",
+        "available": gigaam_available,
+        "requires_cuda": False,
+        "streaming": False,
+        "selected": selected_key == GIGAAM_TRANSCRIPTION_BACKEND_KEY,
+        "reason": gigaam_reason,
+    }]
 
 
 def _strip_wake_word_prefix(text: str) -> str:
@@ -292,15 +391,16 @@ class VoiceActivator:
     """
     Голосовая активация Jarvis.
 
-    Wake word всегда отслеживается через Vosk для минимальной задержки.
-    После активации команда распознаётся выбранным backend:
-    - Vosk: лёгкий, быстрый, менее точный
-    - Vosk Large RU 0.42: тот же потоковый принцип, но большая русская модель
+    Фразы сегментируются по паузам, а wake word и команды распознаются GigaAM.
     """
 
     def __init__(self, transcription_backend_key: str = DEFAULT_TRANSCRIPTION_BACKEND_KEY):
         self.profile = VoiceProfile()  # Теперь не используется для wake word
         self.stt_model = None  # Silero (не используется)
+        self.gigaam_model = None
+        self.gigaam_last_error = ""
+        self._gigaam_load_lock = threading.Lock()
+        self._gigaam_transcribe_lock = threading.Lock()
         self.vosk_model = None
         self.vosk_recognizer = None
         self.command_vosk_model = None
@@ -317,9 +417,12 @@ class VoiceActivator:
         self.callback: Optional[Callable[[str], None]] = None
         self.status_callback: Optional[Callable[[str], None]] = None
         self.partial_callback: Optional[Callable[[str], None]] = None
+        self.audio_level_callback: Optional[Callable[[float], None]] = None
 
         self._listen_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
+        self._listen_ready_event = threading.Event()
+        self._listen_start_error = ""
         self._state_lock = threading.RLock()
         self._wake_cooldown_until = 0.0
 
@@ -336,8 +439,8 @@ class VoiceActivator:
         options = []
         for backend in get_transcription_backend_catalog(self.command_backend_key):
             item = dict(backend)
-            if item["key"] == LARGE_VOSK_TRANSCRIPTION_BACKEND_KEY and self.command_vosk_last_error:
-                item["reason"] = self.command_vosk_last_error
+            if item["key"] == GIGAAM_TRANSCRIPTION_BACKEND_KEY and self.gigaam_last_error:
+                item["reason"] = self.gigaam_last_error
             if item["key"] == self.command_backend_key:
                 item["selected"] = True
             options.append(item)
@@ -353,78 +456,96 @@ class VoiceActivator:
         self.command_vosk_recognizer = None
         self.full_transcript = ""
 
-        # Если уходим с Large Vosk — выгружаем её, чтобы освободить RAM
-        if old_key == LARGE_VOSK_TRANSCRIPTION_BACKEND_KEY and backend_key != LARGE_VOSK_TRANSCRIPTION_BACKEND_KEY:
-            self._unload_large_vosk_model()
-
     def init_models(self, force_reload: bool = False):
-        """Инициализировать wake-word Vosk и выбранный backend расшифровки."""
+        """Инициализировать локальную GigaAM-модель распознавания речи."""
         if not MIC_AVAILABLE:
             print("[Voice] ❌ sounddevice не доступен")
             return False
+        return self._ensure_gigaam_model(force_reload=force_reload)
 
-        # Всегда загружаем малую модель для wake-word
-        wake_ready = self._ensure_wake_recognizer(force_reload=force_reload)
+    def _ensure_gigaam_model(self, force_reload: bool = False) -> bool:
+        global _GIGAAM_SHARED_MODEL, _GIGAAM_SHARED_DEVICE
 
-        # Large Vosk грузим лениво и в фоне, чтобы не блокировать старт/UI.
-        # Если пользователь переключился на Large — проверяем доступность и
-        # запускаем фоновую загрузку, но не ждём её здесь.
-        if self.command_backend_key == LARGE_VOSK_TRANSCRIPTION_BACKEND_KEY:
-            supported, reason = _supports_large_vosk()
-            if not supported:
-                self.command_vosk_last_error = reason
-                print(f"[Voice] ⚠️ Large Vosk недоступен: {reason}")
-                return False
-            self.command_vosk_last_error = ""
-            self._start_large_vosk_background_load(force_reload=force_reload)
-            return wake_ready
-
-        command_ready = self._ensure_command_backend(force_reload=force_reload)
-        return wake_ready and command_ready
-
-    def _ensure_wake_recognizer(self, force_reload: bool = False) -> bool:
-        if not VOSK_AVAILABLE:
-            print("[Voice] ⚠️ Vosk не доступен")
+        supported, reason = _supports_gigaam()
+        if not supported:
+            self.gigaam_last_error = reason
+            print(f"[Voice] ⚠️ GigaAM недоступен: {reason}")
             return False
-
-        if self.vosk_model is not None and self.vosk_recognizer is not None and not force_reload:
+        if self.gigaam_model is not None and not force_reload:
             return True
 
+        with _GIGAAM_SHARED_MODEL_LOCK:
+            if _GIGAAM_SHARED_MODEL is None or force_reload:
+                try:
+                    print(f"[Voice] ⏳ Загрузка GigaAM: {GIGAAM_MODEL_PATH}")
+                    model = AutoModel.from_pretrained(
+                        GIGAAM_MODEL_PATH,
+                        trust_remote_code=True,
+                        local_files_only=True,
+                    )
+                    _GIGAAM_SHARED_DEVICE = (
+                        "mps" if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() else "cpu"
+                    )
+                    _GIGAAM_SHARED_MODEL = model.to(_GIGAAM_SHARED_DEVICE).eval()
+                    print(f"[Voice] ✅ GigaAM инициализирована на {_GIGAAM_SHARED_DEVICE}")
+                except Exception as exc:
+                    _GIGAAM_SHARED_MODEL = None
+                    self.gigaam_model = None
+                    self.gigaam_last_error = str(exc)
+                    print(f"[Voice] ⚠️ Ошибка загрузки GigaAM: {exc}")
+                    return False
+
+            self.gigaam_model = _GIGAAM_SHARED_MODEL
+            self.gigaam_last_error = ""
+            return True
+
+    def _transcribe_gigaam_audio(self, audio: np.ndarray) -> str:
+        if self.gigaam_model is None and not self._ensure_gigaam_model():
+            return ""
+        if sf is None:
+            return ""
+        audio = np.asarray(audio, dtype=np.float32).reshape(-1)
+        if audio.size < int(SAMPLE_RATE * 0.15):
+            return ""
+        # GigaAM's regular transcribe() rejects audio longer than 25 seconds.
+        # Split locally so this also works with the downloaded model variant,
+        # which does not require the optional pyannote longform dependency.
+        max_samples = int(SAMPLE_RATE * GIGAAM_MAX_SHORT_AUDIO_SECONDS)
+        chunks = [audio[start:start + max_samples] for start in range(0, len(audio), max_samples)]
+        texts = []
         try:
-            possible_paths = [
-                _get_vosk_small_path(),
-                os.path.join(os.path.expanduser("~"), ".vosk-models", VOSK_MODEL_NAME),
-                os.path.join(os.path.dirname(__file__), VOSK_MODEL_NAME),
-            ]
+            with self._gigaam_transcribe_lock:
+                for chunk in chunks:
+                    if chunk.size < int(SAMPLE_RATE * 0.15):
+                        continue
+                    temp_path = None
+                    try:
+                        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                            temp_path = temp_file.name
+                        sf.write(temp_path, chunk, SAMPLE_RATE, subtype="PCM_16")
+                        result = self.gigaam_model.transcribe(temp_path)
+                        text = str(getattr(result, "text", result) or "").strip()
+                        if text:
+                            texts.append(text)
+                    finally:
+                        if temp_path:
+                            try:
+                                os.unlink(temp_path)
+                            except OSError:
+                                pass
+            return " ".join(texts).strip()
+        except Exception as exc:
+            self.gigaam_last_error = str(exc)
+            print(f"[Voice] ⚠️ Ошибка распознавания GigaAM: {exc}")
+            return ""
 
-            vosk_model_path = None
-            for path in possible_paths:
-                if os.path.exists(path):
-                    vosk_model_path = path
-                    break
-
-            if vosk_model_path is None:
-                print("[Voice] ⚠️ Модель Vosk не найдена. Попытка загрузки...")
-                if download_vosk_model():
-                    vosk_model_path = os.path.join(os.path.expanduser("~"), ".vosk-models", VOSK_MODEL_NAME)
-                else:
-                    print("[Voice] ⚠️ Не удалось загрузить модель Vosk")
-
-            if vosk_model_path and os.path.exists(vosk_model_path):
-                self.vosk_model = VoskModel(vosk_model_path)
-                self.vosk_recognizer = KaldiRecognizer(self.vosk_model, SAMPLE_RATE)
-                print(f"[Voice] ✅ Wake-word Vosk инициализирован: {vosk_model_path}")
-                return True
-
-            print("[Voice] ⚠️ Vosk модель не доступна. Wake word не будет работать.")
-        except Exception as e:
-            print(f"[Voice] ⚠️ Ошибка инициализации Vosk: {e}")
-            self.vosk_model = None
-            self.vosk_recognizer = None
-
-        return False
+    def _ensure_wake_recognizer(self, force_reload: bool = False) -> bool:
+        return self._ensure_gigaam_model(force_reload=force_reload)
 
     def _ensure_command_backend(self, force_reload: bool = False) -> bool:
+        if self.command_backend_key == GIGAAM_TRANSCRIPTION_BACKEND_KEY:
+            return self._ensure_gigaam_model(force_reload=force_reload)
+
         if self.command_backend_key == DEFAULT_TRANSCRIPTION_BACKEND_KEY:
             if self.vosk_model is None and not self._ensure_wake_recognizer(force_reload=force_reload):
                 return False
@@ -545,6 +666,10 @@ class VoiceActivator:
         """Установить callback для текста команды в реальном времени"""
         self.partial_callback = callback
 
+    def set_audio_level_callback(self, callback: Optional[Callable[[float], None]]):
+        """Передавать нормализованный уровень микрофона в UI."""
+        self.audio_level_callback = callback
+
     def _set_status(self, status: str):
         """Обновить статус"""
         try:
@@ -582,32 +707,26 @@ class VoiceActivator:
 
         threading.Thread(target=_callback_worker, daemon=True, name="VoiceCallbackWorker").start()
 
-    def start_listening(self):
-        """Запустить прослушивание wake word"""
+    def start_listening(self, startup_timeout: float = 6.0) -> bool:
+        """Запустить прослушивание и дождаться открытия аудиовхода."""
         with self._state_lock:
             if self.is_running or (self._listen_thread and self._listen_thread.is_alive()):
-                return
+                return True
 
-            if not self.vosk_recognizer and not self._ensure_wake_recognizer():
-                return
-
-            # Для Large Vosk дожидаемся фоновой загрузки, чтобы распознаватель
-            # был готов к моменту захвата команды. Small грузится мгновенно.
-            if self.command_backend_key == LARGE_VOSK_TRANSCRIPTION_BACKEND_KEY:
-                if not self._ensure_large_vosk_command_model(timeout=LARGE_VOSK_LOAD_TIMEOUT):
-                    self._set_status("Не удалось загрузить Large Vosk")
-                    return
-            else:
-                if not self._ensure_command_backend():
-                    return
+            if not self._ensure_gigaam_model():
+                error = self.gigaam_last_error or "Не удалось загрузить модель распознавания"
+                self._set_status(f"Ошибка голосовой активации: {error}")
+                return False
 
             self.is_running = True
-            self.is_listening = True
+            self.is_listening = False
             self._stop_event.clear()
+            self._listen_ready_event.clear()
+            self._listen_start_error = ""
             self.full_transcript = ""
             self.wake_word_detected = False
             self.is_recording = False
-            self._set_status(f"Слушаю wake word '{WAKE_WORD}'")
+            self._set_status("Подключаю микрофон…")
 
             self._listen_thread = threading.Thread(
                 target=self._listen_loop,
@@ -615,6 +734,26 @@ class VoiceActivator:
                 name="VoiceActivator"
             )
             self._listen_thread.start()
+
+        if not self._listen_ready_event.wait(timeout=max(0.5, float(startup_timeout))):
+            error = "Не удалось подключить микрофон за отведённое время"
+        else:
+            error = self._listen_start_error
+
+        if error:
+            with self._state_lock:
+                self.is_running = False
+                self.is_listening = False
+                self._stop_event.set()
+                listen_thread = self._listen_thread
+            if listen_thread and listen_thread.is_alive():
+                listen_thread.join(timeout=2.0)
+            with self._state_lock:
+                if self._listen_thread is listen_thread and not listen_thread.is_alive():
+                    self._listen_thread = None
+            self._set_status(f"Ошибка голосовой активации: {error}")
+            return False
+        return True
 
     def stop_listening(self):
         """Остановить прослушивание"""
@@ -746,18 +885,77 @@ class VoiceActivator:
         self._set_status(f"Слушаю wake word '{WAKE_WORD}'")
 
     def _listen_loop(self):
-        """Основной цикл прослушивания."""
+        """Запись фраз по паузам и распознавание их через GigaAM."""
+        audio_buffer: List[np.ndarray] = []
+        speech_started = False
+        silence_start = None
+        transcription_in_progress = False
+        noise_floor = SILENCE_THRESHOLD / 2
+
+        def finish_utterance() -> None:
+            nonlocal audio_buffer, speech_started, silence_start, transcription_in_progress
+            if not audio_buffer:
+                return
+            audio = np.concatenate(audio_buffer)
+            audio_buffer = []
+            speech_started = False
+            silence_start = None
+            self.is_recording = False
+            if transcription_in_progress:
+                return
+            transcription_in_progress = True
+
+            def transcribe_worker() -> None:
+                nonlocal transcription_in_progress
+                try:
+                    self._set_status("Распознаю фразу...")
+                    text = self._transcribe_gigaam_audio(audio)
+                    if not text:
+                        self._set_status(f"Слушаю речь через GigaAM. Скажите '{WAKE_WORD}'")
+                        return
+
+                    print(f"[Voice] GigaAM: {text}")
+                    normalized = text.lower().strip()
+                    if WAKE_WORD.lower() in normalized:
+                        command = _strip_wake_word_prefix(text).strip()
+                        if command and command.lower() != normalized:
+                            self._dispatch_callback(command)
+                            self._arm_wake_cooldown()
+                        else:
+                            self.wake_word_detected = True
+                            self._set_status("Wake word услышан. Говорите команду...")
+                        return
+
+                    if self.wake_word_detected:
+                        self.wake_word_detected = False
+                        self._arm_wake_cooldown()
+                        self._set_status("Команда распознана. Отправляю...")
+                        self._dispatch_callback(text)
+                    else:
+                        self._set_status(f"Слушаю речь через GigaAM. Скажите '{WAKE_WORD}'")
+                finally:
+                    transcription_in_progress = False
+
+            threading.Thread(target=transcribe_worker, daemon=True, name="GigaAMTranscriber").start()
+
         try:
-            with sd.InputStream(
-                samplerate=SAMPLE_RATE,
-                channels=1,
-                blocksize=CHUNK_SIZE,
-                dtype="float32"
-            ) as stream:
+            lock_acquired = False
+            lock_deadline = time.monotonic() + 5.0
+            while self.is_running and not self._stop_event.is_set() and time.monotonic() < lock_deadline:
+                if _AUDIO_STREAM_LOCK.acquire(timeout=0.2):
+                    lock_acquired = True
+                    break
+            if not lock_acquired:
+                if self.is_running and not self._stop_event.is_set():
+                    raise RuntimeError("Микрофон занят другой записью")
+                return
+            stream = None
+            try:
+                stream = _open_input_stream_with_retry()
                 self.wake_word_detected = False
-                self.full_transcript = ""
-                silence_start = None
-                last_partial = ""
+                self.is_listening = True
+                self._listen_ready_event.set()
+                self._set_status(f"Слушаю wake word '{WAKE_WORD}'")
 
                 while self.is_running and not self._stop_event.is_set():
                     audio_data, overflowed = stream.read(CHUNK_SIZE)
@@ -765,42 +963,55 @@ class VoiceActivator:
                         print("[Voice] ⚠️ Переполнение аудиобуфера")
 
                     audio_data = np.asarray(audio_data[:, 0], dtype=np.float32)
-                    audio_int16 = np.clip(audio_data * 32767, -32768, 32767).astype(np.int16)
-                    rms = np.sqrt(np.mean(audio_data ** 2))
-                    has_sound = rms > SILENCE_THRESHOLD
+                    rms = float(np.sqrt(np.mean(audio_data ** 2)))
+                    try:
+                        if self.audio_level_callback:
+                            self.audio_level_callback(min(1.0, rms * 18.0))
+                    except Exception:
+                        pass
 
-                    if (
-                        not self.wake_word_detected
-                        and not self._wake_detection_blocked()
-                        and self._process_wake_recognizer(audio_int16)
-                    ):
-                        self._begin_command_capture()
-                        silence_start = None
-                        last_partial = ""
+                    # Пока предыдущая фраза распознаётся, продолжаем читать
+                    # микрофон, но не накапливаем новые данные бесконечно.
+                    if transcription_in_progress:
                         continue
 
-                    if self.wake_word_detected:
-                        if has_sound:
-                            silence_start = None
-                            last_partial = self._feed_vosk_command(audio_int16, last_partial)
-                        else:
-                            if silence_start is None:
-                                silence_start = time.time()
-                            elif time.time() - silence_start > SILENCE_DURATION:
-                                self._finalize_command(last_partial)
-                                silence_start = None
-                                last_partial = ""
+                    # Подстраиваемся под постоянный шум микрофона. Старый
+                    # фиксированный порог 0.001 часто запускал запись от
+                    # вентилятора/клавиатуры и создавал большую задержку.
+                    if not speech_started:
+                        noise_floor = 0.96 * noise_floor + 0.04 * rms
+                    adaptive_threshold = max(SILENCE_THRESHOLD, noise_floor * 3.0)
+                    has_sound = rms > adaptive_threshold
 
-                        if len(self.full_transcript) > 500:
-                            self._finalize_command(last_partial)
+                    if has_sound or speech_started:
+                        audio_buffer.append(audio_data.copy())
+                        if has_sound:
+                            speech_started = True
+                            self.is_recording = True
                             silence_start = None
-                            last_partial = ""
+                        elif silence_start is None:
+                            silence_start = time.time()
+                        elif time.time() - silence_start > SILENCE_DURATION:
+                            finish_utterance()
+
+                        if sum(len(chunk) for chunk in audio_buffer) > SAMPLE_RATE * 25:
+                            finish_utterance()
+            finally:
+                if stream is not None:
+                    try:
+                        stream.stop()
+                    finally:
+                        stream.close()
+                if lock_acquired:
+                    _AUDIO_STREAM_LOCK.release()
 
         except Exception as e:
             import traceback
             print(f"[Voice] ❌ Ошибка: {e}")
             print(traceback.format_exc())
-            self._set_status(f"Ошибка голосовой активации: {e}")
+            self._listen_start_error = str(e)
+            self._listen_ready_event.set()
+            self._set_status(f"Ошибка голосовой активации GigaAM: {e}")
         finally:
             with self._state_lock:
                 self.is_running = False
@@ -921,16 +1132,80 @@ def download_vosk_model(target_dir: str = None) -> bool:
 # One-shot voice message recording (used by the web UI composer mic button)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _record_gigaam_voice_message(
+    max_duration: float,
+    silence_duration: float,
+    stop_event: Optional[threading.Event],
+    audio_level_callback: Optional[Callable[[float], None]] = None,
+    phase_callback: Optional[Callable[[str], None]] = None,
+) -> Dict[str, Any]:
+    if not _supports_gigaam()[0]:
+        return {"ok": False, "error": _supports_gigaam()[1]}
+
+    activator = VoiceActivator(GIGAAM_TRANSCRIPTION_BACKEND_KEY)
+    if not activator.init_models():
+        return {"ok": False, "error": activator.gigaam_last_error or "Не удалось загрузить GigaAM"}
+
+    audio_chunks: List[np.ndarray] = []
+    silence_start = None
+    started_at = time.time()
+    manual_stop = stop_event is not None
+    try:
+        if not _AUDIO_STREAM_LOCK.acquire(timeout=15.0):
+            return {"ok": False, "error": "Микрофон занят другой записью"}
+        stream = None
+        try:
+            stream = _open_input_stream_with_retry()
+            while time.time() - started_at < max(1.0, float(max_duration)):
+                if stop_event is not None and stop_event.is_set():
+                    break
+                audio_data, overflowed = stream.read(CHUNK_SIZE)
+                audio_data = np.asarray(audio_data[:, 0], dtype=np.float32)
+                audio_chunks.append(audio_data.copy())
+                rms = float(np.sqrt(np.mean(audio_data ** 2)))
+                has_sound = rms > SILENCE_THRESHOLD
+                if audio_level_callback:
+                    try:
+                        audio_level_callback(min(1.0, rms * 18.0))
+                    except Exception:
+                        pass
+                if has_sound:
+                    silence_start = None
+                elif silence_start is None:
+                    silence_start = time.time()
+                elif not manual_stop and time.time() - silence_start > max(0.3, float(silence_duration)):
+                    break
+        finally:
+            if stream is not None:
+                try:
+                    stream.stop()
+                finally:
+                    stream.close()
+            _AUDIO_STREAM_LOCK.release()
+    except Exception as exc:
+        return {"ok": False, "error": f"Recording failed: {exc}"}
+
+    if phase_callback:
+        try:
+            phase_callback("transcribing")
+        except Exception:
+            pass
+    text = activator._transcribe_gigaam_audio(np.concatenate(audio_chunks) if audio_chunks else np.array([], dtype=np.float32))
+    return {"ok": True, "text": text, "backend": GIGAAM_TRANSCRIPTION_BACKEND_KEY}
+
 def record_voice_message(
     backend_key: str = DEFAULT_TRANSCRIPTION_BACKEND_KEY,
     max_duration: float = 30.0,
     silence_duration: float = 0.5,
     stop_event: Optional[threading.Event] = None,
+    audio_level_callback: Optional[Callable[[float], None]] = None,
+    partial_callback: Optional[Callable[[str], None]] = None,
+    phase_callback: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Any]:
     """Record a short voice message and transcribe it with Vosk.
 
-    This function does not touch the global VoiceActivator state; it opens a
-    short-lived microphone stream and returns the recognized text.
+    Manual recording stays active until stop_event is set or max_duration expires.
+    This function opens a short-lived microphone stream and returns recognized text.
 
     Returns:
         {"ok": True, "text": "...", "backend": backend_key}
@@ -939,10 +1214,19 @@ def record_voice_message(
     """
     if not MIC_AVAILABLE:
         return {"ok": False, "error": "Microphone is not available. Install sounddevice."}
+    backend_key = _normalize_backend_key(backend_key)
+
+    if backend_key == GIGAAM_TRANSCRIPTION_BACKEND_KEY:
+        return _record_gigaam_voice_message(
+            max_duration,
+            silence_duration,
+            stop_event,
+            audio_level_callback=audio_level_callback,
+            phase_callback=phase_callback,
+        )
+
     if not VOSK_AVAILABLE:
         return {"ok": False, "error": "Vosk is not available. Install vosk."}
-
-    backend_key = _normalize_backend_key(backend_key)
 
     # Resolve model path.
     if backend_key == LARGE_VOSK_TRANSCRIPTION_BACKEND_KEY:
@@ -973,6 +1257,9 @@ def record_voice_message(
     silence_start: Optional[float] = None
     started_at = time.time()
     last_partial = ""
+    input_device = _preferred_input_device()
+    if input_device is None:
+        return {"ok": False, "error": "Не найден доступный входной микрофон"}
 
     try:
         with sd.InputStream(
@@ -980,6 +1267,7 @@ def record_voice_message(
             channels=1,
             blocksize=CHUNK_SIZE,
             dtype="float32",
+            device=input_device,
         ) as stream:
             while time.time() - started_at < max_duration and not (stop_event and stop_event.is_set()):
                 audio_data, overflowed = stream.read(CHUNK_SIZE)
@@ -988,8 +1276,13 @@ def record_voice_message(
 
                 audio_data = np.asarray(audio_data[:, 0], dtype=np.float32)
                 audio_int16 = np.clip(audio_data * 32767, -32768, 32767).astype(np.int16)
-                rms = np.sqrt(np.mean(audio_data ** 2))
+                rms = float(np.sqrt(np.mean(audio_data ** 2)))
                 has_sound = rms > SILENCE_THRESHOLD
+                if audio_level_callback:
+                    try:
+                        audio_level_callback(min(1.0, rms * 18.0))
+                    except Exception:
+                        pass
 
                 # Result() можно вызывать только после того, как Vosk
                 # сообщил о завершённом речевом сегменте. Вызов Result() на
@@ -999,7 +1292,12 @@ def record_voice_message(
                     text = str(result.get("text", "")).strip()
                     if text:
                         full_text = f"{full_text} {text}".strip()
-                        last_partial = ""
+                        last_partial = full_text
+                        if partial_callback:
+                            try:
+                                partial_callback(full_text)
+                            except Exception:
+                                pass
                 else:
                     try:
                         partial = _safe_json_loads(recognizer.PartialResult())
@@ -1009,6 +1307,11 @@ def record_voice_message(
                     display_text = f"{full_text} {partial_text}".strip()
                     if display_text != last_partial:
                         last_partial = display_text
+                        if partial_callback:
+                            try:
+                                partial_callback(display_text)
+                            except Exception:
+                                pass
 
                 if has_sound:
                     silence_start = None
@@ -1028,6 +1331,12 @@ def record_voice_message(
     except Exception:
         pass
 
+    if phase_callback:
+        try:
+            phase_callback("transcribing")
+        except Exception:
+            pass
+
     return {
         "ok": True,
         "text": full_text,
@@ -1039,7 +1348,7 @@ def record_voice_message(
 # Точка входа для тестирования
 # ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    print("🎤 Тестирование голосовой активации Jarvis (Vosk)\n")
+    print("🎤 Тестирование голосовой активации Jarvis (GigaAM)\n")
     print(f"Wake word: '{WAKE_WORD}'\n")
 
     activator = VoiceActivator()
@@ -1064,4 +1373,4 @@ if __name__ == "__main__":
             print("\n🛑 Остановка...")
             activator.stop_listening()
     else:
-        print("\n❌ Не удалось инициализировать Vosk")
+        print("\n❌ Не удалось инициализировать GigaAM")

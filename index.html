@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Jarvis CLI</title>
   <script>window.API_TOKEN = "{{API_TOKEN}}";</script>
-  <link rel="stylesheet" href="/static/app.css?v=30">
+  <link rel="stylesheet" href="/static/app.css?v=41">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
   <style>
     .system-check-banner {
@@ -177,7 +177,7 @@
         <div class="loading-brand-mark">▼</div>
         <h1>Jarvis CLI</h1>
       </div>
-      <p class="loading-subtitle">Локальный AI-ассистент</p>
+      <p class="loading-subtitle" id="startup-subtitle">Подготавливаю рабочее пространство…</p>
       
       <section id="preset-setup-panel" class="loading-panel glow hidden">
         <div class="panel-title-row">
@@ -190,7 +190,7 @@
         </p>
         <form id="preset-setup-form" class="preset-form">
           <label class="label" for="preset-name-input">Название пресета</label>
-          <input id="preset-name-input" class="text-input" type="text" placeholder="Например, Qwen Fast">
+          <input id="preset-name-input" class="text-input" type="text" placeholder="Например, Qwen 3.5 9B">
 
           <div id="preset-backend-wrap" class="hidden">
             <label class="label" for="preset-backend-select">Бэкенд сервера</label>
@@ -202,9 +202,12 @@
           </div>
 
           <div id="preset-llama-fields">
-            <label class="label" for="preset-llama-input">Путь к llama-server.exe</label>
-            <input id="preset-llama-input" class="text-input" type="text" placeholder="C:\llama_server\llama-server.exe" required>
-            <p class="hint" id="preset-llama-hint">Нужен именно <strong>llama-server.exe</strong>, не llama.exe (это другая программа).</p>
+            <label class="label" for="preset-llama-input">llama-server</label>
+            <select id="preset-llama-select" class="text-input hidden">
+              <option value="">— сервер не найден автоматически —</option>
+            </select>
+            <input id="preset-llama-input" class="text-input" type="text" placeholder="Будет найден автоматически" required>
+            <p class="hint" id="preset-llama-hint">Jarvis сам ищет llama-server. Если он не найден, укажите путь вручную.</p>
           </div>
 
           <label class="label" for="preset-model-input">Путь к модели</label>
@@ -341,6 +344,37 @@
         <span id="loading-status-text">Ожидание запуска...</span>
       </div>
     </div>
+
+    <section id="model-boot-screen" class="model-boot-screen hidden" aria-live="polite" aria-atomic="false">
+      <div class="model-boot-content">
+        <div class="model-boot-reactor" aria-hidden="true">
+          <div class="reactor-ring reactor-ring-outer"></div>
+          <div class="reactor-ring reactor-ring-inner"></div>
+          <div class="reactor-core"><span>▼</span></div>
+          <div class="reactor-orbit"></div>
+        </div>
+        <p class="model-boot-eyebrow">JARVIS MODEL CORE</p>
+        <h2 id="model-boot-title">Запуск модели</h2>
+        <p id="model-boot-message" class="model-boot-message">Проверяю выбранный пресет…</p>
+        <ol id="model-boot-steps" class="model-boot-steps">
+          <li data-boot-step="0"><span class="boot-step-icon"></span><span>Проверка пресета</span></li>
+          <li data-boot-step="1"><span class="boot-step-icon"></span><span>Запуск серверного процесса</span></li>
+          <li data-boot-step="2"><span class="boot-step-icon"></span><span>Загрузка модели в память</span></li>
+          <li data-boot-step="3"><span class="boot-step-icon"></span><span>Проверка готовности</span></li>
+        </ol>
+        <div id="model-boot-error" class="model-boot-error hidden">
+          <p id="model-boot-error-message"></p>
+          <details id="model-boot-error-details" class="model-boot-error-details hidden">
+            <summary>Подробности ошибки</summary>
+            <pre id="model-boot-error-log"></pre>
+          </details>
+          <div class="model-boot-actions">
+            <button id="model-boot-retry" type="button" class="primary">Повторить запуск</button>
+            <button id="model-boot-back" type="button" class="ghost">К выбору пресета</button>
+          </div>
+        </div>
+      </div>
+    </section>
   </div>
 
   <div class="shell hidden">
@@ -353,7 +387,7 @@
         </div>
       </div>
 
-      <section class="panel accent chats-panel">
+      <section class="chats-panel">
         <div class="panel-title-row">
           <div class="panel-title">Чаты</div>
           <button id="new-chat-btn" class="icon-action" type="button" aria-label="Новый чат">＋</button>
@@ -433,6 +467,14 @@
               <div class="active-plan-empty">Нет активного плана</div>
             </div>
           </section>
+          <div class="execution-target-row">
+            <label for="execution-target-select">Выполнять на</label>
+            <select id="execution-target-select" aria-label="Устройство для выполнения запроса">
+              <option value="local">Это устройство</option>
+              <option value="add">＋ Подключить устройство…</option>
+            </select>
+            <span id="execution-target-status" aria-live="polite">Локальная модель</span>
+          </div>
           <textarea id="message-input" placeholder="Напиши задачу для Jarvis..." rows="3"></textarea>
           <div id="paste-preview" class="paste-preview is-empty"></div>
           <div class="composer-bar">
@@ -449,6 +491,15 @@
                   <div id="live-status-progress-bar" class="live-status-progress-bar" style="width: 0%"></div>
                 </div>
                 <span id="live-status-progress-text" class="live-status-progress-text">0%</span>
+              </div>
+              <div id="voice-recording-status" class="voice-recording-status hidden" aria-live="polite">
+                <span class="voice-recording-dot" aria-hidden="true"></span>
+                <div class="voice-recording-copy">
+                  <span id="voice-recording-label" class="voice-recording-label">Подключаю микрофон…</span>
+                  <span id="voice-recording-transcript" class="voice-recording-transcript"></span>
+                </div>
+                <div id="voice-recording-meter" class="voice-audio-meter" role="img" aria-label="Уровень звука"></div>
+                <span id="voice-recording-timer" class="voice-recording-timer"></span>
               </div>
             </div>
             <div class="composer-actions">
@@ -477,6 +528,17 @@
       </section>
     </main>
   </div>
+
+  <div id="changes-backdrop" class="changes-backdrop hidden"></div>
+  <aside id="changes-drawer" class="changes-drawer hidden" aria-hidden="true">
+    <header class="changes-drawer-header">
+      <div><div class="hero-kicker">Agent activity</div><div class="panel-title">Изменения файлов</div></div>
+      <button id="changes-close-btn" class="icon-action" type="button" aria-label="Закрыть изменения">×</button>
+    </header>
+    <div id="changes-file-list" class="changes-file-list"></div>
+    <pre id="changes-diff" class="changes-diff"></pre>
+    <footer class="changes-drawer-footer"><span id="changes-status"></span><button id="changes-rollback-btn" class="ghost" type="button">Откатить файл</button></footer>
+  </aside>
 
   <div id="settings-backdrop" class="settings-backdrop hidden"></div>
   <aside id="settings-drawer" class="settings-drawer hidden" aria-hidden="true">
@@ -514,9 +576,46 @@
       <select id="voice-asr-select"></select>
       <p class="hint" id="voice-asr-description">Выберите движок потоковой расшифровки после wake word.</p>
       <div id="vosk-download-banner" class="vosk-download-banner hidden">
-        <p class="hint">Модель Vosk не найдена. Голосовой ввод недоступен.</p>
-        <button id="vosk-download-btn" type="button" class="primary">Скачать Vosk (~35 MB)</button>
+        <p class="hint">Модель GigaAM не найдена. Голосовой ввод недоступен.</p>
+        <button id="vosk-download-btn" type="button" class="primary">Скачать GigaAM</button>
         <span id="vosk-download-status" class="vosk-download-status"></span>
+      </div>
+    </section>
+
+    <section class="panel accent settings-panel remote-device-panel">
+      <div class="panel-title">Другие устройства Jarvis</div>
+      <p class="hint">Подключите устройство в той же сети. Запросы будут выполняться на выбранном Jarvis со всеми его инструментами.</p>
+      <div class="remote-device-host">
+        <strong>Подключить к этому устройству</strong>
+        <p class="hint">Покажите код только тому устройству, которому разрешаете полный доступ к Jarvis.</p>
+        <button id="remote-pair-start-btn" class="ghost" type="button">Показать код подключения</button>
+        <div id="remote-pair-code-wrap" class="remote-pair-code-wrap hidden">
+          <span id="remote-pair-address" class="remote-pair-address"></span>
+          <strong id="remote-pair-code" class="remote-pair-code"></strong>
+          <span id="remote-pair-countdown" class="hint"></span>
+        </div>
+      </div>
+      <form id="remote-pair-connect-form" class="remote-pair-connect-form">
+        <strong>Подключиться к другому устройству</strong>
+        <label class="label" for="remote-pair-host">Адрес устройства-хозяина</label>
+        <input id="remote-pair-host" class="text-input" type="text" placeholder="192.168.1.25:8765" autocomplete="url" required>
+        <label class="label" for="remote-pair-code-input">Код из шести цифр</label>
+        <input id="remote-pair-code-input" class="text-input" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="000000" required>
+        <button id="remote-pair-connect-btn" class="primary" type="submit">Подключить Jarvis</button>
+      </form>
+      <div class="remote-device-status-row">
+        <span id="remote-device-status" class="hint" aria-live="polite">Устройство не подключено</span>
+        <button id="remote-pair-disconnect-btn" class="ghost hidden" type="button">Отключить</button>
+      </div>
+    </section>
+
+    <section class="panel accent settings-panel">
+      <div class="panel-title">llama.cpp · Apple Silicon</div>
+      <p class="hint">Проверка свежих официальных prerelease-сборок llama.cpp для Mac с чипом Apple. Обновление ставится в отдельную папку, а активные пресеты JARVIS переключаются на неё.</p>
+      <div id="llama-update-status" class="hint" aria-live="polite">Версия ещё не проверена.</div>
+      <div class="telegram-account-actions">
+        <button id="llama-update-check-btn" type="button" class="ghost">Проверить сборку</button>
+        <button id="llama-update-apply-btn" type="button" class="primary hidden">Установить</button>
       </div>
     </section>
 
@@ -531,6 +630,13 @@
     </section>
 
     <section class="panel accent settings-panel">
+      <div class="panel-title">Системный промт</div>
+      <p class="hint" id="system-prompt-hint">Выберите, какой системный промт использует Jarvis.</p>
+      <div id="system-prompt-list" class="system-prompt-list"></div>
+      <button id="system-prompt-add-btn" type="button" class="primary system-prompt-add-btn">Добавить промт</button>
+    </section>
+
+    <section class="panel accent settings-panel">
       <div class="panel-title">Инструменты модели</div>
       <p class="hint" id="tools-hint">Здесь можно включить или отключить инструменты для активного пресета.</p>
       <div id="tools-list" class="tools-list"></div>
@@ -541,6 +647,7 @@
     <div class="voice-card">
       <div class="voice-kicker">Голосовой режим</div>
       <div id="voice-overlay-status" class="voice-overlay-status">Слушаю команду...</div>
+      <div id="voice-overlay-meter" class="voice-audio-meter voice-audio-meter-large" role="img" aria-label="Уровень звука"></div>
       <div id="voice-overlay-transcript" class="voice-overlay-transcript">...</div>
       <div class="voice-overlay-hint">Скажите "пятница", затем продиктуйте запрос. После паузы он отправится автоматически.</div>
     </div>
@@ -615,6 +722,28 @@
     </div>
   </div>
 
+  <!-- Модальное окно системного промта -->
+  <div id="system-prompt-modal" class="system-prompt-modal hidden" aria-hidden="true">
+    <div class="system-prompt-backdrop"></div>
+    <div class="system-prompt-card glow">
+      <div class="panel-title-row">
+        <div class="panel-title" id="system-prompt-modal-title">Новый промт</div>
+        <button id="system-prompt-modal-close-btn" type="button" class="icon-action" aria-label="Закрыть">×</button>
+      </div>
+      <form id="system-prompt-form" class="system-prompt-form">
+        <label class="label" for="system-prompt-name">Название</label>
+        <input id="system-prompt-name" class="text-input" type="text" placeholder="Например: Код-ревьюер" required>
+        <label class="label" for="system-prompt-content">Промт</label>
+        <textarea id="system-prompt-content" class="system-prompt-content" rows="10" placeholder="Введите системный промт..." required></textarea>
+        <p class="form-error hidden" id="system-prompt-error"></p>
+        <div class="user-prompt-actions">
+          <button id="system-prompt-cancel-btn" type="button" class="ghost">Отмена</button>
+          <button id="system-prompt-save-btn" type="submit" class="primary">Сохранить</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Модальное окно обновления приложения -->
   <div id="update-modal" class="update-modal hidden" aria-hidden="true">
     <div class="update-modal-backdrop"></div>
@@ -661,6 +790,6 @@
   </template>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-  <script src="/static/app.js?v=43"></script>
+  <script src="/static/app.js?v=56"></script>
 </body>
 </html>

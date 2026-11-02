@@ -7,10 +7,13 @@ import os
 import queue
 import re
 import secrets
+import shlex
+import socket
 import subprocess
 import sys
 import threading
 import time
+import tempfile
 import uuid
 import webbrowser
 from copy import deepcopy
@@ -20,7 +23,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -37,8 +40,11 @@ except ImportError:
     pytextrank = None
 
 import config_manager
+import llama_runtime
 from jarvis_core import state
 from jarvis_tools.background import list_background_tasks, stop_background_task
+from jarvis_tools.change_tracking import begin_change_session, finish_change_session, rollback_change
+from jarvis_fast_mode import FastCommandRouter
 
 from jarvis_cli_gui import (
     AnimationManager,
@@ -102,7 +108,7 @@ ensure_utf8_console()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = BASE_DIR  # Все файлы теперь в одной папке
 CHAT_STORAGE_DIR = os.path.join(BASE_DIR, "jarvis_chats")
-HOST = "127.0.0.1"
+HOST = "0.0.0.0"
 PORT = 8765
 WINDOW_ICON_PATH = os.path.join(BASE_DIR, "jarvis_window_icon.ico")
 WINDOW_TITLE = "Jarvis Desktop"
@@ -196,6 +202,20 @@ def _check_macos_accessibility() -> bool:
         return False
 
 
+def _request_macos_accessibility() -> bool:
+    """Безопасно открыть системный раздел Accessibility."""
+    if not IS_MACOS:
+        return False
+    try:
+        subprocess.Popen([
+            "open",
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+        ])
+        return True
+    except Exception:
+        return False
+
+
 def _check_macos_screen_recording() -> bool:
     """Проверить, есть ли право на запись экрана (скриншоты)."""
     try:
@@ -205,6 +225,29 @@ def _check_macos_screen_recording() -> bool:
         return bool(cg.CGPreflightScreenCaptureAccess())
     except Exception:
         return False
+
+
+def _request_macos_screen_recording() -> bool:
+    """Запросить у macOS разрешение на запись экрана."""
+    if not IS_MACOS:
+        return False
+    try:
+        framework = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics"
+        cg = ctypes.CDLL(framework)
+        cg.CGRequestScreenCaptureAccess.restype = ctypes.c_bool
+        return bool(cg.CGRequestScreenCaptureAccess())
+    except Exception:
+        return False
+
+
+def _request_missing_macos_permissions() -> None:
+    """Запросить системные разрешения при первом запуске приложения."""
+    if not IS_MACOS:
+        return
+    if not _check_macos_accessibility():
+        _request_macos_accessibility()
+    if not _check_macos_screen_recording():
+        _request_macos_screen_recording()
 
 
 def _check_pyautogui() -> bool:
@@ -392,15 +435,45 @@ voice_state: Dict[str, Any] = {
     "listening": False,
     "phase": "idle",
     "status": "Голосовая активация выключена",
+    "audio_level": 0.0,
     "wake_word": WAKE_WORD,
     "overlay_visible": False,
     "live_text": "",
     "final_text": "",
     "final_command_id": 0,
     "backend_key": DEFAULT_TRANSCRIPTION_BACKEND_KEY,
-    "backend_label": "Vosk Small RU",
+    "backend_label": "GigaAM Multilingual",
+    "message_recording": False,
+    "message_transcribing": False,
+    "message_phase": "idle",
+    "message_audio_level": 0.0,
+    "message_text": "",
+    "message_error": "",
     "model_missing": _is_vosk_model_missing(),
     "model_downloading": False,
+}
+fast_router = FastCommandRouter()
+fast_mode_lock = threading.RLock()
+fast_mode_state: Dict[str, Any] = {
+    "mode": "usual",
+    "active": False,
+    "phase": "idle",
+    "status": "Обычный режим",
+    "last_command": "",
+    "last_answer": "",
+    "audio_level": 0.0,
+    "laya_available": fast_router.available,
+}
+model_start_lock = threading.RLock()
+model_start_state: Dict[str, Any] = {
+    "ok": True,
+    "active": False,
+    "model_key": None,
+    "phase": "idle",
+    "step": -1,
+    "message": "Ожидание запуска модели",
+    "error": "",
+    "error_detail": "",
 }
 main_window = None
 
@@ -410,15 +483,46 @@ app.mount("/images", StaticFiles(directory=os.path.join(BASE_DIR, "jarvis_agent_
 
 # Случайный токен для защиты локального API от других процессов/вкладок
 API_TOKEN = secrets.token_urlsafe(32)
+remote_pair_lock = threading.RLock()
+remote_pair_code = ""
+remote_pair_expires = 0.0
+remote_pair_attempts: Dict[str, List[float]] = {}
+remote_peer_tokens: Dict[str, Dict[str, str]] = {}
+remote_chat_ids: Dict[tuple, str] = {}
+remote_connection: Optional[Dict[str, str]] = None
+
+
+def _lan_address() -> str:
+    try:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            probe.connect(("192.0.2.1", 80))
+            return probe.getsockname()[0]
+        finally:
+            probe.close()
+    except Exception:
+        return "127.0.0.1"
 
 
 @app.middleware("http")
 async def api_token_middleware(request, call_next):
     """Проверять токен для всех /api/* запросов, кроме health-check."""
     path = request.url.path
+    client_host = request.client.host if request.client else ""
+    if path == "/" and client_host not in {"127.0.0.1", "::1", "localhost"}:
+        return JSONResponse({"detail": "Откройте интерфейс Jarvis локально; для подключения используйте код сопряжения."}, status_code=403)
+    if path == "/api/remote/pair/claim":
+        return await call_next(request)
     if path.startswith("/api/") and path != "/api/health":
         token = request.headers.get("X-API-Token") or request.query_params.get("token")
-        if not token or not secrets.compare_digest(token, API_TOKEN):
+        api_ok = bool(token and secrets.compare_digest(token, API_TOKEN))
+        remote_ok = False
+        if token and path in {"/api/chat/stream", "/api/chat/stop", "/api/user-response", "/api/changes/rollback", "/api/remote/peer"}:
+            with remote_pair_lock:
+                remote_ok = token in remote_peer_tokens
+            if remote_ok:
+                request.state.remote_peer_id = remote_peer_tokens[token]["peer_id"]
+        if not api_ok and not remote_ok:
             return JSONResponse({"detail": "Invalid or missing API token"}, status_code=403)
     return await call_next(request)
 
@@ -438,6 +542,26 @@ class ChatRequest(BaseModel):
     message: str
     images: List[str] = Field(default_factory=list)
     chat_id: Optional[str] = None
+
+
+class RemotePairClaimRequest(BaseModel):
+    code: str
+    client_name: str = "Jarvis"
+
+
+class RemotePairConnectRequest(BaseModel):
+    host: str
+    code: str
+
+
+class RemoteProxyRequest(BaseModel):
+    prompt_id: Optional[str] = None
+    answer: Optional[str] = None
+
+
+class RollbackChangeRequest(BaseModel):
+    session_id: str
+    path: str
 
 
 class CreateChatRequest(BaseModel):
@@ -517,8 +641,30 @@ class VoiceSettingsRequest(BaseModel):
     enabled: bool
 
 
+class AppModeRequest(BaseModel):
+    mode: str
+
+
 class ASRSettingsRequest(BaseModel):
     engine_key: str
+
+
+class SystemCheckFixRequest(BaseModel):
+    issue_id: str
+
+
+class SystemPromptSaveRequest(BaseModel):
+    name: str
+    content: str
+
+
+class SystemPromptUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    content: Optional[str] = None
+
+
+class SystemPromptActiveRequest(BaseModel):
+    profile_id: str
 
 
 class UserResponseRequest(BaseModel):
@@ -579,12 +725,11 @@ def _ensure_voice_initialized() -> bool:
         )
         return False
 
-    if getattr(desktop_app, "voice_activator", None) is not None:
-        return True
-
     try:
-        desktop_app._init_voice()
         activator = getattr(desktop_app, "voice_activator", None)
+        if activator is None:
+            desktop_app._init_voice()
+            activator = getattr(desktop_app, "voice_activator", None)
         if activator is None:
             raise RuntimeError("Voice activator was not initialized")
 
@@ -592,11 +737,13 @@ def _ensure_voice_initialized() -> bool:
         activator.set_status_callback(_on_voice_status)
         if hasattr(activator, "set_partial_callback"):
             activator.set_partial_callback(_on_voice_partial)
+        if hasattr(activator, "set_audio_level_callback"):
+            activator.set_audio_level_callback(_on_voice_audio_level)
         backend = _get_selected_asr_backend()
         _update_voice_state(
             available=bool(VOICE_AVAILABLE),
             backend_key=backend.get("key", DEFAULT_TRANSCRIPTION_BACKEND_KEY),
-            backend_label=backend.get("label", "Vosk Small RU"),
+            backend_label=backend.get("label", "GigaAM Multilingual"),
         )
         return True
     except Exception as exc:
@@ -625,12 +772,30 @@ def _on_voice_status(status: str) -> None:
     elif "выключена" in status_lower:
         phase = "idle"
 
+    if "ошибка голосовой активации" in status_lower:
+        desktop_app.voice_enabled = False
+        _update_voice_state(
+            enabled=False,
+            listening=False,
+            phase="error",
+            status=str(status),
+            audio_level=0.0,
+            overlay_visible=False,
+        )
+        return
+
     _update_voice_state(
+        enabled=bool(getattr(desktop_app, "voice_enabled", False)),
         listening=bool(getattr(getattr(desktop_app, "voice_activator", None), "is_running", False)),
         status=status,
         phase=phase,
         overlay_visible=overlay_visible,
+        audio_level=0.0 if phase in {"idle", "error"} else _get_voice_state().get("audio_level", 0.0),
     )
+
+
+def _on_voice_audio_level(level: float) -> None:
+    _update_voice_state(audio_level=max(0.0, min(1.0, float(level))))
 
 
 def _on_voice_partial(text: str) -> None:
@@ -645,6 +810,9 @@ def _on_voice_partial(text: str) -> None:
 
 
 def _on_voice_command(command: str) -> None:
+    # Wake word может быть распознано, пока окно свернуто или находится позади
+    # другого приложения. В этот момент возвращаем Jarvis на передний план.
+    _bring_window_to_front()
     current = _get_voice_state()
     _update_voice_state(
         enabled=bool(getattr(desktop_app, "voice_enabled", False)),
@@ -656,6 +824,116 @@ def _on_voice_command(command: str) -> None:
         final_text=str(command or "").strip(),
         final_command_id=int(current.get("final_command_id", 0)) + 1,
     )
+
+
+def _fast_free_answer(command: str) -> str:
+    """Fallback for a free short question in Fast mode."""
+    if not desktop_app.agent.check_health():
+        return "Для свободного вопроса запустите обычный режим или сервер модели."
+    try:
+        result = desktop_app.chat_once(f"!STT Ответь очень кратко, без объяснений: {command}", stream=False, show_thinking=False)
+        return str(result.get("content_clean", result.get("content", ""))).strip() or "Не удалось получить короткий ответ."
+    except Exception as exc:
+        return f"Не удалось обработать вопрос: {exc}"
+
+
+def _on_fast_voice_status(status: str) -> None:
+    lower = str(status or "").lower()
+    phase = "armed"
+    if "wake word услышан" in lower or "говорите команду" in lower:
+        phase = "capturing"
+    elif "распозна" in lower or "отправля" in lower:
+        phase = "processing"
+    elif "выключена" in lower:
+        phase = "idle"
+    with fast_mode_lock:
+        fast_mode_state.update(
+            phase=phase,
+            status=str(status),
+            active=bool(getattr(getattr(desktop_app, "voice_activator", None), "is_running", False)),
+        )
+    if phase in {"capturing", "processing"}:
+        _bring_window_to_front()
+
+
+def _on_fast_voice_partial(text: str) -> None:
+    with fast_mode_lock:
+        fast_mode_state.update(phase="capturing", status="Слушаю команду…", last_command=str(text or ""))
+
+
+def _on_fast_audio_level(level: float) -> None:
+    with fast_mode_lock:
+        if fast_mode_state.get("active"):
+            fast_mode_state["audio_level"] = max(0.0, min(1.0, float(level)))
+
+
+def _on_fast_voice_command(command: str) -> None:
+    _bring_window_to_front()
+    with fast_mode_lock:
+        fast_mode_state.update(phase="processing", status="Быстро обрабатываю…", last_command=str(command or ""))
+
+    def worker() -> None:
+        try:
+            result = fast_router.process(command, fallback=_fast_free_answer)
+            answer = str(result.get("answer", "")).strip()
+            phase = "speaking" if result.get("understood", True) else "unknown"
+            with fast_mode_lock:
+                fast_mode_state.update(phase=phase, status="Отвечаю…" if phase == "speaking" else "Не понял короткий формат команды", last_command=command, last_answer=answer)
+            if TTS.is_available():
+                with tts_lock:
+                    if not TTS.is_model_loaded():
+                        TTS.load_model()
+                    if TTS.is_enabled():
+                        TTS.speak(answer)
+        except Exception as exc:
+            answer = str(exc)
+            with fast_mode_lock:
+                fast_mode_state.update(phase="error", status=answer, last_answer=answer)
+        finally:
+            with fast_mode_lock:
+                if fast_mode_state.get("active"):
+                    fast_mode_state.update(phase="armed", status=f"Скажите «{WAKE_WORD}»")
+
+    threading.Thread(target=worker, daemon=True, name="FastCommandWorker").start()
+
+
+def _start_fast_mode() -> Dict[str, Any]:
+    if not fast_router.available:
+        raise RuntimeError("Laya не установлена. Выполните в окружении Jarvis: pip install laya")
+    if not _ensure_voice_initialized():
+        raise RuntimeError(_get_voice_state().get("status") or "Голосовая активация недоступна")
+    activator = desktop_app.voice_activator
+    if getattr(activator, "is_running", False):
+        activator.stop_listening()
+    activator.set_callback(_on_fast_voice_command)
+    activator.set_status_callback(_on_fast_voice_status)
+    if hasattr(activator, "set_partial_callback"):
+        activator.set_partial_callback(_on_fast_voice_partial)
+    if hasattr(activator, "set_audio_level_callback"):
+        activator.set_audio_level_callback(_on_fast_audio_level)
+    desktop_app.voice_enabled = True
+    if not activator.start_listening():
+        raise RuntimeError(_get_voice_state().get("status") or "Микрофон не удалось запустить")
+    with fast_mode_lock:
+        fast_mode_state.update(mode="fast", active=True, phase="armed", status=f"Скажите «{WAKE_WORD}»", last_command="", last_answer="", audio_level=0.0)
+    return dict(fast_mode_state)
+
+
+def _stop_fast_mode(next_mode: str = "usual") -> Dict[str, Any]:
+    activator = getattr(desktop_app, "voice_activator", None)
+    if activator is not None and getattr(activator, "is_running", False):
+        activator.stop_listening()
+    desktop_app.voice_enabled = False
+    if activator is not None:
+        activator.set_callback(_on_voice_command)
+        activator.set_status_callback(_on_voice_status)
+        if hasattr(activator, "set_partial_callback"):
+            activator.set_partial_callback(_on_voice_partial)
+        if hasattr(activator, "set_audio_level_callback"):
+            activator.set_audio_level_callback(None)
+    with fast_mode_lock:
+        fast_mode_state.update(mode=next_mode, active=False, phase="idle", status="Обычный режим" if next_mode == "usual" else "Стартовый экран", audio_level=0.0)
+    return dict(fast_mode_state)
 
 
 def _ensure_chat_storage_dir() -> None:
@@ -1705,6 +1983,27 @@ def _ensure_window_icon() -> Optional[str]:
 
 
 def _set_windows_app_id() -> None:
+    if sys.platform == "darwin":
+        # pywebview умеет показать окно, но не всегда активирует приложение
+        # после сворачивания на macOS. System Events делает именно активацию.
+        try:
+            script = (
+                'tell application "System Events"\n'
+                f'    set target_process to first process whose unix id is {os.getpid()}\n'
+                '    set frontmost of target_process to true\n'
+                'end tell'
+            )
+            subprocess.run(
+                ["osascript", "-e", script],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=2.0,
+            )
+        except Exception:
+            pass
+        return
+
     if os.name != "nt":
         return
 
@@ -1713,6 +2012,115 @@ def _set_windows_app_id() -> None:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("JarvisDesktop.BlackTriangle")
     except Exception:
         pass
+
+
+def _offer_macos_desktop_shortcut() -> None:
+    """Предложить создать приложение Jarvis на рабочем столе macOS."""
+    if not IS_MACOS:
+        return
+
+    desktop_dir = Path.home() / "Desktop"
+    shortcut_path = desktop_dir / "Jarvis.app"
+    legacy_shortcut_path = desktop_dir / "Jarvis Desktop.command"
+    if not desktop_dir.is_dir():
+        return
+
+    project_dir = Path(__file__).resolve().parent
+    script_path = Path(__file__).resolve()
+    # Не используем Path.resolve() для venv: он развернёт симлинк на системный
+    # Python и тем самым отключит site-packages виртуального окружения.
+    venv_python = project_dir / "venv" / "bin" / "python"
+    python_path = venv_python if venv_python.is_file() else Path(sys.executable)
+    launcher_contents = (
+        "#!/bin/bash\n"
+        f"cd -- {shlex.quote(str(project_dir))}\n"
+        f"exec {shlex.quote(str(python_path))} {shlex.quote(str(script_path))}\n"
+    )
+
+    # Если старый ярлык уже был создан, мигрируем его без повторного вопроса.
+    if not shortcut_path.exists() and not legacy_shortcut_path.exists():
+        dialog_script = (
+            'display dialog "Создать ярлык Jarvis на рабочем столе?\\n\\n'
+            'Он будет запускать приложение напрямую через текущий venv." '
+            'with title "Jarvis Desktop" '
+            'buttons {"Позже", "Создать ярлык"} '
+            'default button "Создать ярлык" cancel button "Позже"'
+        )
+
+        try:
+            dialog = subprocess.run(
+                ["osascript", "-e", dialog_script],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if dialog.returncode != 0 or "Создать ярлык" not in dialog.stdout:
+                return
+        except Exception as exc:
+            print(f"Не удалось показать предложение создать ярлык: {exc}", file=sys.stderr)
+            return
+
+    try:
+        contents_dir = shortcut_path / "Contents"
+        macos_dir = contents_dir / "MacOS"
+        resources_dir = contents_dir / "Resources"
+        macos_dir.mkdir(parents=True, exist_ok=True)
+        resources_dir.mkdir(parents=True, exist_ok=True)
+
+        launcher_path = macos_dir / "Jarvis"
+        launcher_path.write_text(launcher_contents, encoding="utf-8")
+        launcher_path.chmod(0o755)
+
+        info_plist = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key><string>Jarvis</string>
+    <key>CFBundleDisplayName</key><string>Jarvis</string>
+    <key>CFBundleExecutable</key><string>Jarvis</string>
+    <key>CFBundleIdentifier</key><string>com.jarvis.desktop</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleIconFile</key><string>Jarvis.icns</string>
+</dict>
+</plist>
+"""
+        (contents_dir / "Info.plist").write_text(info_plist, encoding="utf-8")
+
+        icon_path = resources_dir / "Jarvis.icns"
+        if not icon_path.exists():
+            with tempfile.TemporaryDirectory(prefix="jarvis-icon-") as temp_dir:
+                iconset_dir = Path(temp_dir) / "Jarvis.iconset"
+                iconset_dir.mkdir()
+                if os.path.isfile(WINDOW_ICON_PATH):
+                    icon_image = Image.open(WINDOW_ICON_PATH).convert("RGBA")
+                else:
+                    icon_image = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+                    ImageDraw.Draw(icon_image).polygon(
+                        [(176, 224), (848, 224), (512, 848)], fill=(0, 0, 0, 255)
+                    )
+                sizes = (16, 32, 128, 256, 512)
+                for size in sizes:
+                    icon_image.resize((size, size), Image.Resampling.LANCZOS).save(
+                        iconset_dir / f"icon_{size}x{size}.png"
+                    )
+                    icon_image.resize((size * 2, size * 2), Image.Resampling.LANCZOS).save(
+                        iconset_dir / f"icon_{size}x{size}@2x.png"
+                    )
+                subprocess.run(
+                    ["iconutil", "-c", "icns", "-o", str(icon_path), str(iconset_dir)],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+
+        # Удаляем только старый ярлык, созданный этой функцией.
+        if legacy_shortcut_path.exists():
+            legacy_contents = legacy_shortcut_path.read_text(encoding="utf-8", errors="ignore")
+            if "jarvis_web_desktop.py" in legacy_contents:
+                legacy_shortcut_path.unlink()
+    except Exception as exc:
+        # Создание ярлыка не должно мешать обычному запуску Jarvis.
+        print(f"Не удалось создать ярлык на рабочем столе: {exc}", file=sys.stderr)
 
 
 def _bring_window_to_front() -> None:
@@ -2421,7 +2829,30 @@ def api_health():
         "voice_backend_available": bool(current_asr.get("available", False)),
         "voice_backend_reason": current_asr.get("reason", ""),
         "active_chat_id": active_chat_id,
+        "app_mode": fast_mode_state.get("mode", "usual"),
+        "fast_mode_active": bool(fast_mode_state.get("active", False)),
     }
+
+
+@app.get("/api/fast/state")
+def api_fast_state():
+    with fast_mode_lock:
+        return {"ok": True, **dict(fast_mode_state)}
+
+
+@app.post("/api/mode")
+def api_set_app_mode(request: AppModeRequest):
+    mode = str(request.mode or "").strip().lower()
+    if mode == "fast":
+        try:
+            return {"ok": True, **_start_fast_mode()}
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+    if mode == "usual":
+        return {"ok": True, **_stop_fast_mode("usual")}
+    if mode in {"menu", "start"}:
+        return {"ok": True, **_stop_fast_mode("menu")}
+    raise HTTPException(status_code=400, detail="Неизвестный режим приложения")
 
 
 @app.get("/api/system-check")
@@ -2432,6 +2863,33 @@ def api_system_check():
         "issues": _run_system_checks(),
         "is_macos": IS_MACOS,
     }
+
+
+@app.post("/api/system-check/fix")
+def api_system_check_fix(request: SystemCheckFixRequest):
+    """Открыть нужное системное окно или страницу настройки."""
+    destinations = {
+        "hf_token_missing": "https://huggingface.co/settings/tokens",
+        "macos_accessibility": "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+        "macos_screen_recording": "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+    }
+    destination = destinations.get(request.issue_id)
+    if not destination:
+        raise HTTPException(status_code=404, detail="Unknown system check issue")
+
+    if request.issue_id == "macos_accessibility":
+        _request_macos_accessibility()
+    elif request.issue_id == "macos_screen_recording":
+        _request_macos_screen_recording()
+
+    try:
+        if IS_MACOS:
+            subprocess.Popen(["open", destination])
+        else:
+            webbrowser.open(destination)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Не удалось открыть настройки: {exc}") from exc
+    return {"ok": True}
 
 
 @app.get("/api/chats")
@@ -2593,6 +3051,19 @@ def api_local_models():
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@app.get("/api/config/preset-options")
+def api_preset_options():
+    """Автоматически найти сервер llama.cpp и локальные GGUF-модели."""
+    try:
+        return {
+            "ok": True,
+            "llama_server": config_manager.find_llama_server(),
+            "models": config_manager.discover_gguf_models(),
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @app.post("/api/models/download")
 def api_download_model(request: DownloadModelRequest):
     """Скачать модель с HuggingFace с прогрессом через SSE."""
@@ -2737,12 +3208,85 @@ def api_benchmark(prompt: str = "Explain quantum computing in simple terms.", ma
     }
 
 
+def _update_model_start_state(phase: str, message: str, *, error: str = "", error_detail: str = "") -> None:
+    step_by_phase = {"validating": 0, "starting": 1, "loading": 2, "checking": 3, "ready": 3}
+    with model_start_lock:
+        current_step = model_start_state.get("step", 0)
+        model_start_state.update(
+            ok=True,
+            active=phase not in {"ready", "error"},
+            phase=phase,
+            step=step_by_phase.get(phase, current_step),
+            message=str(message or ""),
+            error=str(error or ""),
+            error_detail=str(error_detail or ""),
+        )
+
+
+def _run_model_start(model_key: str) -> None:
+    def on_progress(phase: str, message: str) -> None:
+        if phase == "error":
+            lines = str(message or "Не удалось запустить модель.").splitlines()
+            summary = lines[0] if lines else "Не удалось запустить модель."
+            details = "\n".join(lines[1:]).strip()
+            _update_model_start_state("error", "Запуск остановлен из-за ошибки.", error=summary, error_detail=details)
+        else:
+            _update_model_start_state(phase, message)
+
+    try:
+        started = desktop_app.start_selected_llama_server(model_key, progress_callback=on_progress)
+        if started:
+            with model_start_lock:
+                label = model_start_state.get("message") or "Модель готова к работе."
+            _update_model_start_state("ready", label)
+        else:
+            with model_start_lock:
+                already_failed = model_start_state.get("phase") == "error"
+            if not already_failed:
+                log_path = os.path.join(BASE_DIR, "llama_server.log")
+                log_tail = desktop_app._read_llama_server_log_tail(log_path)
+                _update_model_start_state(
+                    "error",
+                    "Не удалось запустить сервер модели.",
+                    error="Сервер не перешёл в состояние готовности.",
+                    error_detail=f"Лог: {log_path}\n{log_tail}",
+                )
+    except Exception as exc:
+        _update_model_start_state(
+            "error",
+            "Запуск остановлен из-за ошибки.",
+            error=f"Не удалось запустить модель: {exc}",
+        )
+
+
+@app.get("/api/server/start/status")
+def api_model_start_status():
+    with model_start_lock:
+        return dict(model_start_state)
+
+
 @app.post("/api/server/start")
 def api_start_model(request: StartModelRequest):
     if request.model_key not in desktop_app.get_model_presets():
         raise HTTPException(status_code=400, detail="Unknown model preset")
-
     preset = desktop_app.get_model_presets().get(request.model_key) or {}
+
+    with model_start_lock:
+        if model_start_state.get("active"):
+            if model_start_state.get("model_key") == request.model_key:
+                return dict(model_start_state)
+            raise HTTPException(status_code=409, detail="Другая модель уже запускается.")
+        model_start_state.update({
+            "ok": True,
+            "active": True,
+            "model_key": request.model_key,
+            "phase": "validating",
+            "step": 0,
+            "message": f"Проверяю настройки пресета «{preset.get('label', request.model_key)}»…",
+            "error": "",
+            "error_detail": "",
+        })
+
     config_index = preset.get("config_index")
     if config_index is not None:
         try:
@@ -2751,32 +3295,20 @@ def api_start_model(request: StartModelRequest):
             desktop_app._sync_agent_base_url()
         except ValueError:
             pass
-
-    original_print_status = UI.print_status
-    original_print_error = UI.print_error
-    UI.print_status = staticmethod(lambda message, status_type="info": print(f"[server] {message}"))
-    UI.print_error = staticmethod(lambda message: print(f"[server error] {message}"))
-    try:
-        started = desktop_app.start_selected_llama_server(request.model_key)
-    except Exception as exc:
-        import traceback
-        detail = f"Failed to start llama-server: {exc}\n{traceback.format_exc()}"
-        raise HTTPException(status_code=500, detail=detail) from exc
-    finally:
-        UI.print_status = original_print_status
-        UI.print_error = original_print_error
-
-    if not started:
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to start llama-server (timeout or process error)",
-        )
-
-    preset = desktop_app.get_selected_model_preset()
+        except Exception as exc:
+            _update_model_start_state("error", "Не удалось подготовить пресет.", error=str(exc))
+            raise HTTPException(status_code=500, detail=f"Не удалось подготовить пресет: {exc}") from exc
+    threading.Thread(
+        target=_run_model_start,
+        args=(request.model_key,),
+        daemon=True,
+        name="JarvisModelStart",
+    ).start()
     return {
         "ok": True,
-        "selected_model_key": desktop_app.selected_model_key,
-        "selected_model_label": preset["label"],
+        "starting": True,
+        "model_key": request.model_key,
+        "selected_model_label": preset.get("label", request.model_key),
     }
 
 
@@ -2883,7 +3415,11 @@ def api_set_voice(request: VoiceSettingsRequest):
     desktop_app.voice_enabled = enabled
 
     if enabled:
-        activator.start_listening()
+        if not activator.start_listening():
+            desktop_app.voice_enabled = False
+            state = _get_voice_state()
+            _update_voice_state(enabled=False, listening=False, phase="error", overlay_visible=False)
+            raise HTTPException(status_code=503, detail=state.get("status") or "Не удалось подключить микрофон")
         state = _update_voice_state(
             available=True,
             enabled=True,
@@ -2894,7 +3430,7 @@ def api_set_voice(request: VoiceSettingsRequest):
             overlay_visible=False,
             live_text="",
             backend_key=backend.get("key", DEFAULT_TRANSCRIPTION_BACKEND_KEY),
-            backend_label=backend.get("label", "Vosk Small RU"),
+            backend_label=backend.get("label", "GigaAM Multilingual"),
         )
     else:
         activator.stop_listening()
@@ -2915,9 +3451,265 @@ def api_set_voice(request: VoiceSettingsRequest):
     return {"ok": True, **state}
 
 
+def _refresh_agent_system_prompt() -> None:
+    """Пересобрать системный промт агента после смены профиля."""
+    try:
+        desktop_app.agent.refresh_system_prompt()
+    except Exception:
+        pass
+
+
+@app.get("/api/system-prompts")
+def api_list_system_prompts():
+    return {"ok": True, **config_manager.list_system_prompt_profiles()}
+
+
+@app.get("/api/system-prompts/{profile_id}")
+def api_get_system_prompt(profile_id: str):
+    try:
+        content = config_manager.get_custom_system_prompt_content(profile_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"ok": True, "id": profile_id, "content": content}
+
+
+@app.post("/api/system-prompts")
+def api_create_system_prompt(request: SystemPromptSaveRequest):
+    try:
+        result = config_manager.create_system_prompt_profile(request.name, request.content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, **result}
+
+
+@app.put("/api/system-prompts/{profile_id}")
+def api_update_system_prompt(profile_id: str, request: SystemPromptUpdateRequest):
+    try:
+        result = config_manager.update_system_prompt_profile(
+            profile_id,
+            name=request.name,
+            content=request.content,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _refresh_agent_system_prompt()
+    return {"ok": True, **result}
+
+
+@app.delete("/api/system-prompts/{profile_id}")
+def api_delete_system_prompt(profile_id: str):
+    try:
+        result = config_manager.delete_system_prompt_profile(profile_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    _refresh_agent_system_prompt()
+    return {"ok": True, **result}
+
+
+@app.post("/api/system-prompts/active")
+def api_set_active_system_prompt(request: SystemPromptActiveRequest):
+    try:
+        result = config_manager.set_active_system_prompt_profile(request.profile_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _refresh_agent_system_prompt()
+    return {"ok": True, **result}
+
+
 @app.get("/api/voice/state")
 def api_voice_state():
     return {"ok": True, **_get_voice_state()}
+
+
+@app.post("/api/remote/pair/start")
+def api_remote_pair_start():
+    global remote_pair_code, remote_pair_expires
+    if not desktop_app.agent.check_health():
+        raise HTTPException(status_code=409, detail="Сначала запустите модель на этом устройстве.")
+    with remote_pair_lock:
+        remote_pair_code = f"{secrets.randbelow(1_000_000):06d}"
+        remote_pair_expires = time.time() + 180
+    return {
+        "ok": True,
+        "code": remote_pair_code,
+        "expires_in": 180,
+        "address": f"http://{_lan_address()}:{PORT}",
+        "device_name": socket.gethostname(),
+    }
+
+
+@app.post("/api/remote/pair/claim")
+def api_remote_pair_claim(request: RemotePairClaimRequest, http_request: Request):
+    """One-time six-digit pairing exchange; ordinary API routes stay token protected."""
+    global remote_pair_code, remote_pair_expires
+    address = http_request.client.host if http_request.client else "unknown"
+    now = time.time()
+    with remote_pair_lock:
+        attempts = [stamp for stamp in remote_pair_attempts.get(address, []) if now - stamp < 60]
+        if len(attempts) >= 8:
+            remote_pair_attempts[address] = attempts
+            raise HTTPException(status_code=429, detail="Слишком много попыток. Подождите минуту.")
+        attempts.append(now)
+        remote_pair_attempts[address] = attempts
+        if not remote_pair_code or now >= remote_pair_expires or not secrets.compare_digest(str(request.code), remote_pair_code):
+            raise HTTPException(status_code=403, detail="Код неверный или срок его действия истёк.")
+        token = secrets.token_urlsafe(32)
+        peer_id = uuid.uuid4().hex
+        remote_peer_tokens[token] = {"peer_id": peer_id, "name": str(request.client_name or "Jarvis")[:80]}
+        remote_pair_code = ""
+        remote_pair_expires = 0.0
+    return {"ok": True, "token": token, "device_name": socket.gethostname()}
+
+
+@app.post("/api/remote/pair/connect")
+def api_remote_pair_connect(request: RemotePairConnectRequest):
+    global remote_connection
+    host = str(request.host or "").strip().rstrip("/")
+    if not host:
+        raise HTTPException(status_code=400, detail="Укажите адрес Jarvis-хозяина.")
+    if not host.startswith(("http://", "https://")):
+        host = f"http://{host}"
+    try:
+        response = requests.post(
+            f"{host}/api/remote/pair/claim",
+            json={"code": request.code, "client_name": socket.gethostname()},
+            timeout=8,
+        )
+        payload = response.json()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Не удалось связаться с устройством: {exc}") from exc
+    if not response.ok or not payload.get("ok"):
+        raise HTTPException(status_code=response.status_code, detail=payload.get("detail", "Не удалось подключиться"))
+    remote_connection = {
+        "host": host,
+        "token": payload["token"],
+        "device_name": payload.get("device_name", "Jarvis"),
+    }
+    return {"ok": True, "device_name": remote_connection["device_name"]}
+
+
+@app.get("/api/remote/state")
+def api_remote_state():
+    with remote_pair_lock:
+        connection = dict(remote_connection) if remote_connection else None
+        has_code = bool(remote_pair_code and time.time() < remote_pair_expires)
+        expires_in = max(0, int(remote_pair_expires - time.time())) if has_code else 0
+    return {
+        "ok": True,
+        "connected": bool(connection),
+        "device_name": connection.get("device_name", "") if connection else "",
+        "host": connection.get("host", "") if connection else "",
+        "paired_clients": [peer.get("name", "Jarvis") for peer in remote_peer_tokens.values()],
+        "pair_code_active": has_code,
+        "pair_code_expires_in": expires_in,
+    }
+
+
+@app.delete("/api/remote/pair")
+def api_remote_pair_disconnect():
+    global remote_connection
+    connection = remote_connection
+    if connection:
+        try:
+            requests.delete(
+                f"{connection['host']}/api/remote/peer",
+                headers={"X-API-Token": connection["token"]},
+                timeout=3,
+            )
+        except Exception:
+            pass
+    remote_connection = None
+    return {"ok": True}
+
+
+@app.delete("/api/remote/peer")
+def api_remote_peer_revoke(request: Request):
+    token = request.headers.get("X-API-Token", "")
+    with remote_pair_lock:
+        peer = remote_peer_tokens.pop(token, None)
+        if peer:
+            for key in [key for key in remote_chat_ids if key[0] == peer["peer_id"]]:
+                remote_chat_ids.pop(key, None)
+    return {"ok": True}
+
+
+def _remote_connection_or_error() -> Dict[str, str]:
+    connection = remote_connection
+    if not connection:
+        raise HTTPException(status_code=409, detail="Нет подключения к другому устройству.")
+    return dict(connection)
+
+
+@app.post("/api/remote/chat/stream")
+def api_remote_chat_stream(request: ChatRequest):
+    connection = _remote_connection_or_error()
+    try:
+        response = requests.post(
+            f"{connection['host']}/api/chat/stream",
+            headers={"X-API-Token": connection["token"]},
+            json=request.dict(),
+            stream=True,
+            timeout=(8, None),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Связь с устройством потеряна: {exc}") from exc
+    if not response.ok:
+        try:
+            detail = response.json().get("detail", response.text)
+        except Exception:
+            detail = response.text
+        response.close()
+        raise HTTPException(status_code=response.status_code, detail=detail)
+
+    def relay():
+        try:
+            for chunk in response.iter_content(chunk_size=4096):
+                if chunk:
+                    yield chunk
+        finally:
+            response.close()
+
+    return StreamingResponse(relay(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.post("/api/remote/chat/stop")
+def api_remote_chat_stop():
+    connection = _remote_connection_or_error()
+    try:
+        response = requests.post(f"{connection['host']}/api/chat/stop", headers={"X-API-Token": connection["token"]}, timeout=8)
+        return JSONResponse(response.json(), status_code=response.status_code)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Не удалось остановить удалённую задачу: {exc}") from exc
+
+
+@app.post("/api/remote/user-response")
+def api_remote_user_response(request: RemoteProxyRequest):
+    connection = _remote_connection_or_error()
+    try:
+        response = requests.post(
+            f"{connection['host']}/api/user-response",
+            headers={"X-API-Token": connection["token"]},
+            json={"prompt_id": request.prompt_id, "answer": request.answer or ""},
+            timeout=8,
+        )
+        return JSONResponse(response.json(), status_code=response.status_code)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Не удалось передать ответ Jarvis: {exc}") from exc
+
+
+@app.post("/api/remote/changes/rollback")
+def api_remote_changes_rollback(request: RollbackChangeRequest):
+    connection = _remote_connection_or_error()
+    try:
+        response = requests.post(
+            f"{connection['host']}/api/changes/rollback",
+            headers={"X-API-Token": connection["token"]},
+            json=request.dict(),
+            timeout=12,
+        )
+        return JSONResponse(response.json(), status_code=response.status_code)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Не удалось отменить изменение на удалённом устройстве: {exc}") from exc
 
 
 @app.post("/api/voice/reset")
@@ -2964,12 +3756,62 @@ def api_voice_record_message_start():
             "activator": activator,
         }
 
+        _update_voice_state(
+            message_recording=True,
+            message_transcribing=False,
+            message_phase="connecting",
+            message_audio_level=0.0,
+            message_text="",
+            message_error="",
+        )
+
+        def on_audio_level(level: float) -> None:
+            _update_voice_state(
+                message_recording=True,
+                message_phase="recording",
+                message_audio_level=max(0.0, min(1.0, float(level))),
+            )
+
+        def on_partial_text(text: str) -> None:
+            _update_voice_state(message_text=str(text or ""))
+
+        def on_recording_phase(phase: str) -> None:
+            if phase == "transcribing":
+                _update_voice_state(
+                    message_recording=False,
+                    message_transcribing=True,
+                    message_phase="transcribing",
+                    message_audio_level=0.0,
+                )
+
         def worker() -> None:
             session["result"] = record_voice_message(
                 backend_key=backend.get("key"),
                 max_duration=300.0,
                 stop_event=stop_event,
+                audio_level_callback=on_audio_level,
+                partial_callback=on_partial_text,
+                phase_callback=on_recording_phase,
             )
+            result = session["result"] or {}
+            _update_voice_state(
+                message_recording=False,
+                message_transcribing=False,
+                message_phase="idle",
+                message_audio_level=0.0,
+                message_text=str(result.get("text") or ""),
+                message_error="" if result.get("ok") else str(result.get("error") or "Не удалось записать голосовое сообщение"),
+            )
+            if not result.get("ok") and voice_was_running and activator is not None:
+                if not activator.start_listening():
+                    desktop_app.voice_enabled = False
+                    _update_voice_state(
+                        enabled=False,
+                        listening=False,
+                        phase="error",
+                        overlay_visible=False,
+                        status=_get_voice_state().get("status") or "Не удалось повторно включить микрофон",
+                    )
 
         thread = threading.Thread(target=worker, daemon=True, name="VoiceMessageRecorder")
         session["thread"] = thread
@@ -2989,14 +3831,22 @@ def api_voice_record_message_stop():
         if session is None:
             return {"ok": False, "error": "Запись не запущена"}
         session["stop_event"].set()
+        _update_voice_state(
+            message_recording=False,
+            message_transcribing=True,
+            message_phase="transcribing",
+            message_audio_level=0.0,
+            message_error="",
+        )
 
     thread = session.get("thread")
     if thread is not None:
-        thread.join(timeout=8.0)
+        thread.join(timeout=60.0)
 
     result = session.get("result")
     if result is None:
-        result = {"ok": False, "error": "Расшифровка ещё выполняется"}
+        _update_voice_state(message_transcribing=True, message_error="Расшифровка всё ещё выполняется")
+        raise HTTPException(status_code=503, detail="Расшифровка всё ещё выполняется. Нажмите кнопку ещё раз, чтобы проверить результат.")
 
     activator = session.get("activator")
     if session.get("voice_was_running") and activator is not None:
@@ -3070,8 +3920,17 @@ def api_chat(request: ChatRequest):
 
 
 @app.post("/api/chat/stream")
-def api_chat_stream(request: ChatRequest):
+def api_chat_stream(request: ChatRequest, http_request: Request):
     target_chat_id = request.chat_id or active_chat_id
+    remote_peer_id = getattr(http_request.state, "remote_peer_id", None)
+    if remote_peer_id:
+        client_chat_id = str(request.chat_id or "default")[:64]
+        remote_key = (remote_peer_id, client_chat_id)
+        target_chat_id = remote_chat_ids.get(remote_key)
+        if not target_chat_id:
+            record = _create_chat_record(f"Удалённая сессия · {remote_peer_tokens.get(http_request.headers.get('X-API-Token', ''), {}).get('name', 'Jarvis')}")
+            target_chat_id = record["id"]
+            remote_chat_ids[remote_key] = target_chat_id
     if target_chat_id:
         _activate_chat(target_chat_id)
 
@@ -3099,6 +3958,8 @@ def api_chat_stream(request: ChatRequest):
 
             state.image_progress_handler = image_progress_handler
 
+            change_session = None
+            change_result = None
             with chat_lock:
                 # Compact before the next model request, while the current
                 # history is still available and no generation is running.
@@ -3127,6 +3988,7 @@ def api_chat_stream(request: ChatRequest):
                                 message=compacted.get("reason", "Не удалось сжать контекст"),
                             )
 
+                change_session = begin_change_session()
                 with bridge.patched():
                     try:
                         for result in desktop_app.agent.send_message(
@@ -3137,12 +3999,14 @@ def api_chat_stream(request: ChatRequest):
                         ):
                             if result.get("type") == "final":
                                 final_content = result.get("content", "")
+                                change_result = finish_change_session(change_session)
                                 bridge.push(
                                     "final",
                                     content=final_content,
                                     content_clean=result.get("content_clean", final_content),
                                     timings=result.get("timings"),
                                     iterations=result.get("iterations", 0),
+                                    changes=change_result,
                                 )
                     except Exception as exc:
                         error_message = str(exc)
@@ -3160,6 +4024,8 @@ def api_chat_stream(request: ChatRequest):
                         else:
                             bridge.push("error", message=error_message)
                     finally:
+                        if change_session is not None and change_result is None:
+                            change_result = finish_change_session(change_session)
                         with active_stream_lock:
                             if active_stream_bridge is bridge:
                                 active_stream_bridge = None
@@ -3187,6 +4053,31 @@ def api_chat_stream(request: ChatRequest):
                 break
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.get("/api/changes/{session_id}")
+def api_get_changes(session_id: str):
+    from jarvis_tools.change_tracking import _lock, _sessions
+    with _lock:
+        session = _sessions.get(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Сводка изменений не найдена")
+        files = []
+        for path, entry in session["files"].items():
+            before = entry["before"].decode("utf-8", errors="replace").splitlines(keepends=True)
+            after_bytes = entry.get("after", b"")
+            after = after_bytes.decode("utf-8", errors="replace").splitlines(keepends=True)
+            import difflib
+            files.append({"path": path, "diff": "".join(difflib.unified_diff(before, after, fromfile="До", tofile="После", n=3)), "created": not entry["existed"]})
+    return {"id": session_id, "files": files}
+
+
+@app.post("/api/changes/rollback")
+def api_rollback_change(request: RollbackChangeRequest):
+    ok, message = rollback_change(request.session_id, request.path)
+    if not ok:
+        raise HTTPException(status_code=409, detail=message)
+    return {"ok": True, "message": message}
 
 
 @app.post("/api/log_frontend_perf")
@@ -3313,7 +4204,11 @@ def _disconnect_telegram_account() -> None:
 
 
 def shutdown_resources() -> None:
-    """Gracefully release resources before exit: llama-server, Telegram."""
+    """Gracefully release resources and revoke any outbound Jarvis pairing."""
+    try:
+        api_remote_pair_disconnect()
+    except Exception:
+        pass
     try:
         if desktop_app is not None:
             desktop_app.shutdown_llama_server()
@@ -3414,6 +4309,24 @@ def api_apply_update():
     return {"ok": True, "restarted": True}
 
 
+@app.get("/api/llama/update/check")
+def api_check_llama_update():
+    """Check the latest official Apple Silicon llama.cpp prerelease build."""
+    try:
+        return llama_runtime.check_for_update()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/llama/update/apply")
+def api_apply_llama_update():
+    """Install a verified official llama.cpp build for supported presets."""
+    try:
+        return llama_runtime.install_latest()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @app.post("/api/shutdown")
 def api_shutdown():
     """Release resources and shut down llama-server gracefully."""
@@ -3428,6 +4341,8 @@ def run_backend():
 def main():
     global main_window
     _set_windows_app_id()
+    _offer_macos_desktop_shortcut()
+    _request_missing_macos_permissions()
 
     reload_llama_server_presets()
     status = config_manager.get_config_status()

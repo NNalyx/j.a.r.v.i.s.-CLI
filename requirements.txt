@@ -17,10 +17,14 @@ easyocr
 pywinauto
 
 # --- Voice ---
-vosk
 sounddevice
+laya
 librosa
 torch
+torchaudio
+transformers>=5
+hydra-core
+soundfile
 silero
 
 # --- TTS ---

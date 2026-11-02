@@ -704,7 +704,7 @@ def _search_with_duckduckgo_html(query: str) -> ToolResult:
             "Accept-Language": "en-US,en;q=0.9,ru;q=0.8",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         },
-        timeout=15,
+        timeout=(3, 5),
     )
     response = session.post(
         "https://html.duckduckgo.com/html/",
@@ -714,7 +714,7 @@ def _search_with_duckduckgo_html(query: str) -> ToolResult:
             "Accept-Language": "en-US,en;q=0.9,ru;q=0.8",
             "Referer": "https://duckduckgo.com/",
         },
-        timeout=15,
+        timeout=(3, 5),
     )
     response.raise_for_status()
     page_html = response.text
@@ -763,7 +763,7 @@ def _search_with_bing(query: str) -> ToolResult:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             "Accept-Language": "en-US,en;q=0.9,ru;q=0.8",
         },
-        timeout=15,
+        timeout=(3, 5),
     )
     response.raise_for_status()
     page_html = response.text
