@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Jarvis CLI</title>
   <script>window.API_TOKEN = "{{API_TOKEN}}";</script>
-  <link rel="stylesheet" href="/static/app.css?v=41">
+  <link rel="stylesheet" href="/static/app.css?v=42">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
   <style>
     .system-check-banner {
@@ -595,10 +595,21 @@
           <span id="remote-pair-countdown" class="hint"></span>
         </div>
       </div>
+      <div class="remote-discovery-block">
+        <div class="remote-discovery-heading">
+          <strong>Найденные устройства</strong>
+          <button id="remote-discovery-refresh-btn" class="ghost" type="button">Обновить</button>
+        </div>
+        <span id="remote-discovery-status" class="hint" aria-live="polite">Ищу Jarvis в локальной сети…</span>
+        <div id="remote-discovery-list" class="remote-discovery-list"></div>
+      </div>
       <form id="remote-pair-connect-form" class="remote-pair-connect-form">
         <strong>Подключиться к другому устройству</strong>
-        <label class="label" for="remote-pair-host">Адрес устройства-хозяина</label>
-        <input id="remote-pair-host" class="text-input" type="text" placeholder="192.168.1.25:8765" autocomplete="url" required>
+        <details class="remote-manual-address">
+          <summary>Указать адрес вручную</summary>
+          <label class="label" for="remote-pair-host">Адрес устройства-хозяина</label>
+          <input id="remote-pair-host" class="text-input" type="text" placeholder="192.168.1.25:8765" autocomplete="url">
+        </details>
         <label class="label" for="remote-pair-code-input">Код из шести цифр</label>
         <input id="remote-pair-code-input" class="text-input" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="000000" required>
         <button id="remote-pair-connect-btn" class="primary" type="submit">Подключить Jarvis</button>
@@ -790,6 +801,6 @@
   </template>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-  <script src="/static/app.js?v=56"></script>
+  <script src="/static/app.js?v=57"></script>
 </body>
 </html>

@@ -30,6 +30,16 @@ from pydantic import BaseModel, Field
 from PIL import Image, ImageDraw
 
 try:
+    from zeroconf import ServiceBrowser, ServiceInfo, ServiceListener, Zeroconf
+    ZEROCONF_AVAILABLE = True
+except ImportError:
+    ServiceBrowser = ServiceInfo = Zeroconf = None
+    ZEROCONF_AVAILABLE = False
+
+    class ServiceListener:
+        pass
+
+try:
     import spacy
 except ImportError:
     spacy = None
@@ -491,6 +501,146 @@ remote_pair_attempts: Dict[str, List[float]] = {}
 remote_peer_tokens: Dict[str, Dict[str, str]] = {}
 remote_chat_ids: Dict[tuple, str] = {}
 remote_connection: Optional[Dict[str, str]] = None
+DISCOVERY_SERVICE_TYPE = "_jarvis._tcp.local."
+DISCOVERY_INSTANCE_ID = uuid.uuid4().hex
+remote_discovery_lock = threading.RLock()
+remote_discovery_event = threading.Event()
+remote_discovered_devices: Dict[str, Dict[str, Any]] = {}
+remote_zeroconf = None
+remote_service_browser = None
+remote_service_info = None
+
+
+class JarvisDiscoveryListener(ServiceListener):
+    def __init__(self, zeroconf_instance):
+        self.zeroconf_instance = zeroconf_instance
+
+    @staticmethod
+    def _decode_properties(properties: Dict[Any, Any]) -> Dict[str, str]:
+        decoded = {}
+        for key, value in (properties or {}).items():
+            if isinstance(key, bytes):
+                key = key.decode("utf-8", errors="replace")
+            if isinstance(value, bytes):
+                value = value.decode("utf-8", errors="replace")
+            decoded[str(key)] = str(value)
+        return decoded
+
+    def add_service(self, zeroconf_instance, service_type: str, name: str) -> None:
+        self._update_service(service_type, name)
+
+    def update_service(self, zeroconf_instance, service_type: str, name: str) -> None:
+        self._update_service(service_type, name)
+
+    def remove_service(self, zeroconf_instance, service_type: str, name: str) -> None:
+        with remote_discovery_lock:
+            remote_discovered_devices.pop(name, None)
+            remote_discovery_event.set()
+
+    def _update_service(self, service_type: str, name: str) -> None:
+        try:
+            info = self.zeroconf_instance.get_service_info(service_type, name, timeout=1200)
+            if info is None:
+                return
+            properties = self._decode_properties(info.properties)
+            if properties.get("device_type") != "jarvis":
+                return
+            if properties.get("instance_id") == DISCOVERY_INSTANCE_ID:
+                return
+
+            addresses = []
+            for address in info.addresses:
+                if len(address) == 4:
+                    parsed = socket.inet_ntop(socket.AF_INET, address)
+                    if not parsed.startswith("127."):
+                        addresses.append(parsed)
+            if not addresses:
+                return
+
+            device = {
+                "id": properties.get("instance_id") or name,
+                "name": properties.get("device_name") or name.split(".")[0],
+                "host": f"http://{addresses[0]}:{info.port}",
+                "address": addresses[0],
+                "port": int(info.port),
+            }
+            with remote_discovery_lock:
+                remote_discovered_devices[name] = device
+                remote_discovery_event.set()
+        except Exception as exc:
+            print(f"[Discovery] Не удалось прочитать устройство {name}: {exc}")
+
+
+def _start_remote_discovery() -> bool:
+    global remote_zeroconf, remote_service_browser, remote_service_info
+    if not ZEROCONF_AVAILABLE:
+        print("[Discovery] zeroconf не установлен; будет доступен ручной ввод адреса.")
+        return False
+
+    with remote_discovery_lock:
+        if remote_zeroconf is not None:
+            return True
+
+    zc = None
+    try:
+        device_name = socket.gethostname().strip() or "Jarvis"
+        service_host = re.sub(r"[^A-Za-z0-9-]", "-", device_name.split(".")[0]).strip("-") or "jarvis"
+        local_address = _lan_address()
+        zc = Zeroconf()
+        listener = JarvisDiscoveryListener(zc)
+        browser = ServiceBrowser(zc, DISCOVERY_SERVICE_TYPE, listener)
+        service_info = ServiceInfo(
+            DISCOVERY_SERVICE_TYPE,
+            f"{service_host}-{DISCOVERY_INSTANCE_ID[:6]}.{DISCOVERY_SERVICE_TYPE}",
+            addresses=[socket.inet_aton(local_address)],
+            port=PORT,
+            properties={
+                "device_type": "jarvis",
+                "device_name": device_name,
+                "instance_id": DISCOVERY_INSTANCE_ID,
+                "protocol": "1",
+            },
+            server=f"{service_host}.local.",
+        )
+        zc.register_service(service_info, allow_name_change=True)
+        with remote_discovery_lock:
+            remote_zeroconf = zc
+            remote_service_browser = browser
+            remote_service_info = service_info
+        print(f"[Discovery] Jarvis объявлен в локальной сети как {device_name} ({local_address}:{PORT})")
+        return True
+    except Exception as exc:
+        print(f"[Discovery] Автопоиск устройств недоступен: {exc}")
+        if zc is not None:
+            try:
+                zc.close()
+            except Exception:
+                pass
+        return False
+
+
+def _stop_remote_discovery() -> None:
+    global remote_zeroconf, remote_service_browser, remote_service_info
+    with remote_discovery_lock:
+        zc = remote_zeroconf
+        browser = remote_service_browser
+        service_info = remote_service_info
+        remote_zeroconf = None
+        remote_service_browser = None
+        remote_service_info = None
+        remote_discovered_devices.clear()
+    if browser is not None:
+        try:
+            browser.cancel()
+        except Exception:
+            pass
+    if zc is not None:
+        try:
+            if service_info is not None:
+                zc.unregister_service(service_info)
+            zc.close()
+        except Exception:
+            pass
 
 
 def _lan_address() -> str:
@@ -3522,6 +3672,25 @@ def api_voice_state():
     return {"ok": True, **_get_voice_state()}
 
 
+@app.get("/api/remote/discovery")
+def api_remote_discovery():
+    if not ZEROCONF_AVAILABLE:
+        return {
+            "ok": True,
+            "available": False,
+            "devices": [],
+            "message": "Автопоиск недоступен. Установите зависимости Jarvis или введите адрес вручную.",
+        }
+    with remote_discovery_lock:
+        has_devices = bool(remote_discovered_devices)
+    if not has_devices:
+        remote_discovery_event.clear()
+        remote_discovery_event.wait(timeout=1.2)
+    with remote_discovery_lock:
+        devices = sorted(remote_discovered_devices.values(), key=lambda item: item["name"].casefold())
+    return {"ok": True, "available": True, "devices": devices}
+
+
 @app.post("/api/remote/pair/start")
 def api_remote_pair_start():
     global remote_pair_code, remote_pair_expires
@@ -4206,6 +4375,7 @@ def _disconnect_telegram_account() -> None:
 
 def shutdown_resources() -> None:
     """Gracefully release resources and revoke any outbound Jarvis pairing."""
+    _stop_remote_discovery()
     try:
         api_remote_pair_disconnect()
     except Exception:
@@ -4374,6 +4544,7 @@ def main():
             "Проверьте, не занят ли порт другим процессом."
         )
     print(f"[Startup] Сервер готов, открываю интерфейс: {url}")
+    _start_remote_discovery()
 
     if webview is not None:
         window_icon = _ensure_window_icon()

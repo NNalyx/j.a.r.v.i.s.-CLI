@@ -106,6 +106,9 @@ const remotePairConnectForm = document.getElementById("remote-pair-connect-form"
 const remotePairHostInput = document.getElementById("remote-pair-host");
 const remotePairCodeInput = document.getElementById("remote-pair-code-input");
 const remotePairConnectBtn = document.getElementById("remote-pair-connect-btn");
+const remoteDiscoveryRefreshBtn = document.getElementById("remote-discovery-refresh-btn");
+const remoteDiscoveryStatus = document.getElementById("remote-discovery-status");
+const remoteDiscoveryList = document.getElementById("remote-discovery-list");
 const remoteDeviceStatus = document.getElementById("remote-device-status");
 const remotePairDisconnectBtn = document.getElementById("remote-pair-disconnect-btn");
 const voiceRecordingStatus = document.getElementById("voice-recording-status");
@@ -6118,6 +6121,7 @@ if (settingsToggleBtn) {
     refreshTelegramAccountStatus();
     loadSystemPrompts();
     refreshRemoteState();
+    refreshRemoteDevices();
     setSettingsDrawerOpen(true);
   });
 }
@@ -6164,6 +6168,60 @@ async function refreshRemoteState() {
 }
 
 refreshRemoteState();
+
+async function refreshRemoteDevices() {
+  if (!remoteDiscoveryList || !remoteDiscoveryStatus) return;
+  if (remoteDiscoveryRefreshBtn) {
+    remoteDiscoveryRefreshBtn.disabled = true;
+    remoteDiscoveryRefreshBtn.textContent = "Ищу…";
+  }
+  remoteDiscoveryStatus.textContent = "Ищу Jarvis в локальной сети…";
+  try {
+    const response = await fetch("/api/remote/discovery", { cache: "no-store" });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.detail || "Не удалось выполнить поиск");
+    remoteDiscoveryList.replaceChildren();
+    if (!data.available) {
+      remoteDiscoveryStatus.textContent = data.message || "Автопоиск недоступен. Укажите адрес вручную.";
+      return;
+    }
+    const devices = Array.isArray(data.devices) ? data.devices : [];
+    if (!devices.length) {
+      remoteDiscoveryStatus.textContent = "Jarvis не найден. Проверьте, что оба устройства в одной сети, затем попробуйте снова.";
+      return;
+    }
+    remoteDiscoveryStatus.textContent = `Найдено устройств: ${devices.length}. Выберите компьютер-хозяин:`;
+    devices.forEach((device) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "remote-discovery-device";
+      button.classList.toggle("is-selected", remotePairHostInput?.value === device.host);
+      const name = document.createElement("strong");
+      name.textContent = device.name || "Jarvis";
+      const address = document.createElement("span");
+      address.textContent = `${device.address}:${device.port}`;
+      button.append(name, address);
+      button.addEventListener("click", () => {
+        if (remotePairHostInput) remotePairHostInput.value = device.host || "";
+        remoteDiscoveryList.querySelectorAll(".remote-discovery-device").forEach((item) => item.classList.remove("is-selected"));
+        button.classList.add("is-selected");
+        if (remoteDeviceStatus) remoteDeviceStatus.textContent = `Выбрано ${device.name || "Jarvis"}. Введите код, показанный на этом устройстве.`;
+      });
+      remoteDiscoveryList.appendChild(button);
+    });
+  } catch (error) {
+    remoteDiscoveryStatus.textContent = `Ошибка поиска устройств: ${error.message}`;
+  } finally {
+    if (remoteDiscoveryRefreshBtn) {
+      remoteDiscoveryRefreshBtn.disabled = false;
+      remoteDiscoveryRefreshBtn.textContent = "Обновить";
+    }
+  }
+}
+
+refreshRemoteDevices();
+
+remoteDiscoveryRefreshBtn?.addEventListener("click", refreshRemoteDevices);
 
 if (executionTargetSelect) {
   executionTargetSelect.addEventListener("change", () => {
@@ -6225,10 +6283,12 @@ if (remotePairConnectForm) {
     remotePairConnectBtn.textContent = "Подключаю…";
     if (remoteDeviceStatus) remoteDeviceStatus.textContent = "Выполняю сопряжение…";
     try {
+      const host = remotePairHostInput.value.trim();
+      if (!host) throw new Error("Выберите найденное устройство или укажите адрес вручную.");
       const response = await fetch("/api/remote/pair/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ host: remotePairHostInput.value.trim(), code: remotePairCodeInput.value.trim() }),
+        body: JSON.stringify({ host, code: remotePairCodeInput.value.trim() }),
       });
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.detail || "Не удалось подключиться");
