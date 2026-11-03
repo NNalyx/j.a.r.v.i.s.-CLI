@@ -33,15 +33,24 @@
 
 ## Требования
 
-- **Windows:** Windows 10/11, NVIDIA GPU с CUDA (рекомендуется, но не обязательно)
-- **macOS:** macOS 12+, Intel или Apple Silicon (M1/M1X/M2/M3). На Apple Silicon доступно ускорение через MLX
-- Python 3.10+
+- **Windows:** Windows 10/11 x64. NVIDIA GPU с CUDA рекомендуется для ускорения модели, но Jarvis можно установить и без него.
+- **macOS:** macOS 12+, Intel или Apple Silicon (M1/M1X/M2/M3). На Apple Silicon доступно ускорение через MLX.
 - Скомпилированный `llama-server` для вашей платформы из [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp)
 - Модели Vosk (для голоса):
   - [vosk-model-small-ru-0.22](https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip)
   - [vosk-model-ru-0.42](https://alphacephei.com/vosk/models/vosk-model-ru-0.42.zip) (опционально, для лучшего качества)
 
 ## Установка
+
+### Windows 10/11
+
+1. Скачайте [последний успешный Windows installer](https://github.com/NNalyx/j.a.r.v.i.s.-CLI/actions/workflows/windows-installer.yml): откройте последний зелёный запуск workflow и скачайте `Jarvis-Setup-Windows-x64` в разделе **Artifacts**.
+2. Запустите `Jarvis-Setup-Windows-x64.exe` и завершите установку. Мастер создаст ярлык Jarvis в меню «Пуск» и на рабочем столе.
+3. Откройте Jarvis. В мастере настройки выберите `llama-server.exe` и GGUF-модель. `llama-server` и модели устанавливаются отдельно и не входят в установщик.
+
+Установщик сам устанавливает нужные компоненты и зависимости, включая WebView2, Python и Git для автообновлений. Подключение к интернету требуется во время установки; скачивание моделей не выполняется. Запуск приложения и обновление из интерфейса не требуют командной строки.
+
+### macOS и установка из исходников
 
 ```bash
 # 1. Клонируйте репозиторий
@@ -77,17 +86,6 @@ pip install -r requirements.txt
 <img width="2552" height="1377" alt="image" src="https://github.com/user-attachments/assets/1dd5ef21-f6f5-47f3-93c4-2f19dfaebdb0" />
 
 ## Запуск
-
-**Windows:**
-
-Для обычной установки используйте `Jarvis-Setup-Windows-x64.exe` из последнего запуска workflow **Windows installer** на GitHub: откройте **Actions → Windows installer → Artifacts**. Мастер установит приложение, WebView2, приватную копию Python и Git для автообновлений, затем создаст ярлык. Во время установки нужны интернет и несколько минут для загрузки зависимостей. Модели и `llama-server` в установщик не входят; их можно указать в мастере Jarvis после запуска. Запуск из ярлыка не открывает консоль.
-
-Для разработки вручную:
-
-```powershell
-.venv\Scripts\activate
-python jarvis_web_desktop.py
-```
 
 **macOS:**
 ```bash
