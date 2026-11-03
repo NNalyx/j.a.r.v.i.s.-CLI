@@ -272,7 +272,8 @@ def run_python(code: str) -> ToolResult:
             encoding='utf-8',
             errors='replace',
             timeout=30,
-            env=env  # Используем настроенное окружение
+            env=env,  # Используем настроенное окружение
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         output = result.stdout
         error = result.stderr

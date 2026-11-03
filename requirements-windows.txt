@@ -1,0 +1,25 @@
+# Windows app dependencies. Install CPU-only PyTorch separately in the installer.
+fastapi
+uvicorn[standard]
+requests
+pywebview
+playwright
+zeroconf>=0.132
+Pillow
+spacy
+pytextrank
+easyocr
+pywinauto
+sounddevice
+laya
+librosa
+transformers>=5
+hydra-core
+soundfile
+silero
+numpy
+supertonic
+pyTelegramBotAPI
+telethon
+fuzzywuzzy
+python-Levenshtein

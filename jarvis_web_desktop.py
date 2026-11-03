@@ -4400,8 +4400,11 @@ atexit.register(shutdown_resources)
 
 def _run_git(args: List[str], cwd: str, timeout: float = 30.0) -> subprocess.CompletedProcess:
     """Run a git command and return its result."""
+    base_dir = Path(cwd)
+    bundled_git = base_dir / "Git" / "cmd" / "git.exe"
+    git_command = str(bundled_git) if bundled_git.is_file() else "git"
     return subprocess.run(
-        ["git", *args],
+        [git_command, *args],
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -4414,6 +4417,8 @@ def _run_git(args: List[str], cwd: str, timeout: float = 30.0) -> subprocess.Com
 def api_check_update():
     """Check whether a newer version is available on the remote origin."""
     base_dir = Path(__file__).resolve().parent
+    if not (base_dir / ".git").is_dir():
+        raise HTTPException(status_code=501, detail="This installation does not contain a Git working copy")
     try:
         fetch_result = _run_git(["fetch", "origin", "--depth=1"], str(base_dir), timeout=20.0)
         if fetch_result.returncode != 0:
@@ -4444,6 +4449,8 @@ def api_check_update():
 def api_apply_update():
     """Pull the latest version from origin and restart the application."""
     base_dir = Path(__file__).resolve().parent
+    if not (base_dir / ".git").is_dir():
+        raise HTTPException(status_code=501, detail="This installation does not contain a Git working copy")
     check = api_check_update()
     if not check.get("available"):
         return {"ok": True, "restarted": False, "reason": "No update available"}
@@ -4466,6 +4473,7 @@ def api_apply_update():
             start_new_session=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to start updater: {exc}")

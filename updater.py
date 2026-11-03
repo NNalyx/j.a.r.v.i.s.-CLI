@@ -40,8 +40,14 @@ def main() -> None:
         sys.exit(1)
 
     # Detach from the terminal/session so the new app outlives this helper.
+    interpreter = sys.executable
+    if os.name == "nt":
+        candidate = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+        if os.path.isfile(candidate):
+            interpreter = candidate
+
     subprocess.Popen(
-        [sys.executable, script_path],
+        [interpreter, script_path],
         cwd=project_dir,
         start_new_session=True,
         stdout=subprocess.DEVNULL,

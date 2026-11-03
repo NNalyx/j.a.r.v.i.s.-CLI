@@ -63,6 +63,7 @@ def _ensure_server_running() -> Optional[str]:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
     # Wait for the server to come up.

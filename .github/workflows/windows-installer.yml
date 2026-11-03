@@ -1,0 +1,48 @@
+name: Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Prepare clean Git working copy for the installer
+        shell: pwsh
+        run: git clone --branch main --depth 1 "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY.git" installer/windows/payload
+
+      - name: Download prerequisites
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force installer/windows/prerequisites | Out-Null
+          Invoke-WebRequest 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe' -OutFile installer/windows/prerequisites/python-installer.exe
+          $release = Invoke-RestMethod 'https://api.github.com/repos/git-for-windows/git/releases/latest'
+          $gitAsset = $release.assets | Where-Object { $_.name -match '^Git-.*-64-bit\.exe$' } | Select-Object -First 1
+          if (-not $gitAsset) { throw 'Git for Windows 64-bit installer was not found in the latest release.' }
+          Invoke-WebRequest $gitAsset.browser_download_url -OutFile installer/windows/prerequisites/git-installer.exe
+          Invoke-WebRequest 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile installer/windows/prerequisites/webview2-installer.exe
+
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force installer/windows/output | Out-Null
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' installer/windows/Jarvis.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Jarvis-Setup-Windows-x64
+          path: installer/windows/output/Jarvis-Setup-Windows-x64.exe
+          if-no-files-found: error
