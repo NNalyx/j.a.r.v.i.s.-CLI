@@ -64,6 +64,19 @@ begin
   Result := Result and (ResultCode = 0);
 end;
 
+function WebView2RuntimeInstalled(): Boolean;
+var
+  Version: String;
+  RuntimeId: String;
+begin
+  RuntimeId := '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
+  Result :=
+    (RegQueryStringValue(HKLM64, 'SOFTWARE\Microsoft\EdgeUpdate\Clients\' + RuntimeId, 'pv', Version) and (Version <> '')) or
+    (RegQueryStringValue(HKLM32, 'SOFTWARE\Microsoft\EdgeUpdate\Clients\' + RuntimeId, 'pv', Version) and (Version <> '')) or
+    (RegQueryStringValue(HKCU64, 'Software\Microsoft\EdgeUpdate\Clients\' + RuntimeId, 'pv', Version) and (Version <> '')) or
+    (RegQueryStringValue(HKCU32, 'Software\Microsoft\EdgeUpdate\Clients\' + RuntimeId, 'pv', Version) and (Version <> ''));
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ErrorText: String;
@@ -82,9 +95,13 @@ begin
     PythonInstaller := ExpandConstant('{tmp}\python-installer.exe');
     WebViewInstaller := ExpandConstant('{tmp}\webview2-installer.exe');
 
-    WizardForm.StatusLabel.Caption := 'Устанавливаем WebView2 для окна приложения…';
-    if not RunHidden(WebViewInstaller, '/silent /install', ExpandConstant('{tmp}'), ErrorText) then
-      RaiseException(ErrorText + #13#10 + 'Установка остановлена.');
+    if WebView2RuntimeInstalled then
+      WizardForm.StatusLabel.Caption := 'WebView2 уже установлен — пропускаем этот шаг…'
+    else begin
+      WizardForm.StatusLabel.Caption := 'Устанавливаем WebView2 для окна приложения…';
+      if not RunHidden(WebViewInstaller, '/silent /install', ExpandConstant('{tmp}'), ErrorText) then
+        RaiseException(ErrorText + #13#10 + 'Установка остановлена.');
+    end;
 
     WizardForm.StatusLabel.Caption := 'Устанавливаем Git для автообновлений…';
     if not RunHidden(GitInstaller, '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /DIR="' + ExpandConstant('{app}\Git') + '"', ExpandConstant('{tmp}'), ErrorText) then
