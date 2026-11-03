@@ -1,5 +1,5 @@
 #define AppName "Jarvis Desktop"
-#define AppVersion "1.0.0"
+#define AppVersion "1.0.1"
 #define PayloadDir AddBackslash(SourcePath) + "payload"
 
 [Setup]
@@ -68,12 +68,16 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   ErrorText: String;
   PythonExe: String;
+  PythonwExe: String;
+  VersionedPythonwExe: String;
   GitInstaller: String;
   PythonInstaller: String;
   WebViewInstaller: String;
 begin
   if CurStep = ssPostInstall then begin
     PythonExe := ExpandConstant('{app}\python\python.exe');
+    PythonwExe := ExpandConstant('{app}\python\pythonw.exe');
+    VersionedPythonwExe := ExpandConstant('{app}\python\pythonw3.12.exe');
     GitInstaller := ExpandConstant('{tmp}\git-installer.exe');
     PythonInstaller := ExpandConstant('{tmp}\python-installer.exe');
     WebViewInstaller := ExpandConstant('{tmp}\webview2-installer.exe');
@@ -87,8 +91,13 @@ begin
       RaiseException(ErrorText + #13#10 + 'Установка остановлена.');
 
     WizardForm.StatusLabel.Caption := 'Устанавливаем приватный Python…';
-    if not RunHidden(PythonInstaller, '/quiet InstallAllUsers=0 TargetDir="' + ExpandConstant('{app}\python') + '" Include_pip=1 Include_launcher=0 PrependPath=0 Shortcuts=0 Include_test=0', ExpandConstant('{tmp}'), ErrorText) then
+    if not RunHidden(PythonInstaller, '/quiet InstallAllUsers=0 TargetDir="' + ExpandConstant('{app}\python') + '" Include_exe=1 Include_pip=1 Include_launcher=0 PrependPath=0 Shortcuts=0 Include_test=0', ExpandConstant('{tmp}'), ErrorText) then
       RaiseException(ErrorText + #13#10 + 'Установка остановлена.');
+
+    if not FileExists(PythonwExe) and FileExists(VersionedPythonwExe) then
+      FileCopy(VersionedPythonwExe, PythonwExe, False);
+    if not FileExists(PythonExe) or not FileExists(PythonwExe) then
+      RaiseException('Python установился не полностью: не найден python.exe или pythonw.exe в ' + ExpandConstant('{app}\python') + '. Удалите папку Jarvis и запустите установщик снова.');
 
     WizardForm.StatusLabel.Caption := 'Устанавливаем PyTorch CPU…';
     if not RunHidden(PythonExe, '-m pip install --disable-pip-version-check torch torchaudio --index-url https://download.pytorch.org/whl/cpu', ExpandConstant('{app}'), ErrorText) then
