@@ -90,7 +90,7 @@ source .venv/bin/activate
 python jarvis_web_desktop.py
 ```
 
-Приложение откроет окно pywebview и поднимет локальный FastAPI-сервер на `http://127.0.0.1:8765`.
+Приложение откроет окно pywebview на `http://127.0.0.1:8765`. FastAPI слушает сетевые интерфейсы для сопряжения устройств; основной интерфейс доступен локально. При старте приложение дожидается готовности веб-сервера и сообщает, если порт `8765` занят.
 <img width="1415" height="948" alt="image" src="https://github.com/user-attachments/assets/03150bff-fd75-458d-8c09-b9337f8d7caf" />
 
 ### Работа через другое устройство Jarvis

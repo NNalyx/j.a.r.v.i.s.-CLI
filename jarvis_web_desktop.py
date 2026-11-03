@@ -109,6 +109,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = BASE_DIR  # Все файлы теперь в одной папке
 CHAT_STORAGE_DIR = os.path.join(BASE_DIR, "jarvis_chats")
 HOST = "0.0.0.0"
+LOCAL_HOST = "127.0.0.1"
 PORT = 8765
 WINDOW_ICON_PATH = os.path.join(BASE_DIR, "jarvis_window_icon.ico")
 WINDOW_TITLE = "Jarvis Desktop"
@@ -4353,9 +4354,27 @@ def main():
 
     backend_thread = threading.Thread(target=run_backend, daemon=True)
     backend_thread.start()
-    time.sleep(1.2)
+    url = f"http://{LOCAL_HOST}:{PORT}"
+    print(f"[Startup] Ожидаю сервер Jarvis на {url}…")
+    ready_deadline = time.monotonic() + 10.0
+    backend_ready = False
+    while time.monotonic() < ready_deadline and backend_thread.is_alive():
+        try:
+            response = requests.get(url, timeout=0.5)
+            if response.status_code == 200 and API_TOKEN in response.text:
+                backend_ready = True
+                break
+        except requests.RequestException:
+            pass
+        time.sleep(0.15)
 
-    url = f"http://{HOST}:{PORT}"
+    if not backend_ready:
+        raise RuntimeError(
+            f"Веб-сервер Jarvis не запустился на порту {PORT}. "
+            "Проверьте, не занят ли порт другим процессом."
+        )
+    print(f"[Startup] Сервер готов, открываю интерфейс: {url}")
+
     if webview is not None:
         window_icon = _ensure_window_icon()
         main_window = webview.create_window(
