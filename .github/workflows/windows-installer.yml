@@ -17,7 +17,7 @@ jobs:
 
       - name: Prepare clean Git working copy for the installer
         shell: pwsh
-        run: git clone --branch main --depth 1 "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY.git" installer/windows/payload
+        run: git clone --branch main "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY.git" installer/windows/payload
 
       - name: Download prerequisites
         shell: pwsh

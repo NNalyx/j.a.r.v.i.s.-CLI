@@ -4426,7 +4426,13 @@ def api_check_update():
     if not (base_dir / ".git").is_dir():
         raise HTTPException(status_code=501, detail="This installation does not contain a Git working copy")
     try:
-        fetch_result = _run_git(["fetch", "origin", "--depth=1"], str(base_dir), timeout=20.0)
+        shallow_result = _run_git(["rev-parse", "--is-shallow-repository"], str(base_dir), timeout=5.0)
+        if shallow_result.returncode != 0:
+            raise HTTPException(status_code=500, detail="Unable to inspect the local Git repository")
+        fetch_args = ["fetch", "origin", "main"]
+        if shallow_result.stdout.strip().lower() == "true":
+            fetch_args = ["fetch", "--unshallow", "origin", "main"]
+        fetch_result = _run_git(fetch_args, str(base_dir), timeout=90.0)
         if fetch_result.returncode != 0:
             raise HTTPException(status_code=500, detail=f"git fetch failed: {fetch_result.stderr.strip()}")
 
@@ -4453,7 +4459,7 @@ def api_check_update():
 
 @app.post("/api/update/apply")
 def api_apply_update():
-    """Pull the latest version from origin and restart the application."""
+    """Fast-forward to the fetched main branch and restart the application."""
     base_dir = Path(__file__).resolve().parent
     if not (base_dir / ".git").is_dir():
         raise HTTPException(status_code=501, detail="This installation does not contain a Git working copy")
@@ -4462,9 +4468,10 @@ def api_apply_update():
         return {"ok": True, "restarted": False, "reason": "No update available"}
 
     try:
-        pull_result = _run_git(["pull", "origin", "main"], str(base_dir), timeout=60.0)
-        if pull_result.returncode != 0:
-            raise HTTPException(status_code=500, detail=f"git pull failed: {pull_result.stderr.strip()}")
+        update_result = _run_git(["merge", "--ff-only", "origin/main"], str(base_dir), timeout=60.0)
+        if update_result.returncode != 0:
+            detail = update_result.stderr.strip() or update_result.stdout.strip()
+            raise HTTPException(status_code=500, detail=f"Fast-forward update failed: {detail}")
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="git pull timed out")
 

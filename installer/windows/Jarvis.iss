@@ -1,5 +1,5 @@
 #define AppName "Jarvis Desktop"
-#define AppVersion "1.0.4"
+#define AppVersion "1.0.5"
 #define PayloadDir AddBackslash(SourcePath) + "payload"
 
 [Setup]
@@ -32,6 +32,9 @@ Name: "desktopicon"; Description: "Создать ярлык на рабочем
 
 [Dirs]
 Name: "{app}\jarvis_agent_images"
+
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\.git"
 
 [Files]
 Source: "{#PayloadDir}\.git\*"; DestDir: "{app}\.git"; Flags: recursesubdirs createallsubdirs ignoreversion
