@@ -1,5 +1,5 @@
 #define AppName "Jarvis Desktop"
-#define AppVersion "1.0.5"
+#define AppVersion "1.0.6"
 #define PayloadDir AddBackslash(SourcePath) + "payload"
 
 [Setup]
