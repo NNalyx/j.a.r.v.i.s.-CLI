@@ -6298,13 +6298,18 @@ if (remotePairStartBtn) {
   remotePairStartBtn.addEventListener("click", async () => {
     remotePairStartBtn.disabled = true;
     remotePairStartBtn.textContent = "Создаю код…";
+    remotePairCodeWrap?.classList.add("hidden");
+    if (remoteDeviceStatus) remoteDeviceStatus.textContent = "Проверяю модель на этом компьютере и создаю код…";
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
     try {
-      const response = await fetch("/api/remote/pair/start", { method: "POST" });
+      const response = await fetch("/api/remote/pair/start", { method: "POST", signal: controller.signal });
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.detail || "Не удалось создать код");
       if (remotePairAddress) remotePairAddress.textContent = `Адрес: ${data.address}`;
       if (remotePairCode) remotePairCode.textContent = data.code;
       remotePairCodeWrap?.classList.remove("hidden");
+      if (remoteDeviceStatus) remoteDeviceStatus.textContent = "Покажите этот код клиентскому устройству. Код действует три минуты.";
       let remaining = Number(data.expires_in) || 180;
       clearInterval(remotePairCountdownTimer);
       const tick = () => {
@@ -6318,8 +6323,12 @@ if (remotePairStartBtn) {
       tick();
       remotePairCountdownTimer = setInterval(tick, 1000);
     } catch (error) {
-      if (remoteDeviceStatus) remoteDeviceStatus.textContent = error.message;
+      const message = error.name === "AbortError"
+        ? "Не дождался ответа Jarvis. Проверьте, что приложение и модель запущены, затем попробуйте снова."
+        : error.message;
+      if (remoteDeviceStatus) remoteDeviceStatus.textContent = message;
     } finally {
+      clearTimeout(timeoutId);
       remotePairStartBtn.disabled = false;
       remotePairStartBtn.textContent = "Показать код подключения";
     }

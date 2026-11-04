@@ -3695,7 +3695,13 @@ def api_remote_discovery():
 def api_remote_pair_start():
     global remote_pair_code, remote_pair_expires
     if not desktop_app.agent.check_health():
-        raise HTTPException(status_code=409, detail="Сначала запустите модель на этом устройстве.")
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Чтобы показать код, запустите модель на этом компьютере-хозяине. "
+                "На клиентском компьютере без модели код не создаётся: введите там код, показанный хозяином."
+            ),
+        )
     with remote_pair_lock:
         remote_pair_code = f"{secrets.randbelow(1_000_000):06d}"
         remote_pair_expires = time.time() + 180
