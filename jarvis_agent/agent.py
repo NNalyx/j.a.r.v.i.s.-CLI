@@ -20,7 +20,7 @@ import config_manager
 from jarvis_core.colors import Colors
 from jarvis_core.types import ToolResult
 from jarvis_memory.manager import MemoryManager
-from jarvis_tools.definitions import TOOLS_DEFINITION, TOOLS_MAP
+from jarvis_tools.definitions import CLIENT_LOCAL_TOOL_NAMES, TOOLS_DEFINITION, TOOLS_MAP
 from jarvis_tools.background import background_tasks_context
 from jarvis_ui.animation import AnimationManager
 from jarvis_ui.console import UI
@@ -339,6 +339,7 @@ class QwenAgent:
 ## Windows command priorities
 - `run_cmd` is primary: `start`, `explorer`, `taskkill /F /IM app.exe`, `dir`, `copy`, `del`, `move`, `mkdir`, `systeminfo`, `tasklist`.
 - GUI automation: `launch_app` first, then `get_app_context` / `do_action_in_app`. Use `take_screenshot` only for visual confirmation.
+- For C# interop passed to PowerShell `Add-Type`, use the real `[StructLayout(LayoutKind.Sequential)]` attribute; `[Struct(...)]` is invalid. Check native structure field sizes before running interop code.
 """
 
         tools_prompt = f"""
@@ -1420,7 +1421,7 @@ When `generate_image` succeeds, include the result as: `(image)[/absolute/path/t
         if tool_name == "set_working_directory" and self.remote_tool_executor is None:
             return self.set_working_directory(**args)
 
-        if self.remote_tool_executor is not None and tool_name not in {"ask_user", "generate_image"}:
+        if self.remote_tool_executor is not None and tool_name not in CLIENT_LOCAL_TOOL_NAMES:
             try:
                 return self.remote_tool_executor(tool_name, args)
             except Exception as exc:

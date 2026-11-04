@@ -29,6 +29,7 @@ def run_cmd(command: str, cwd: str = "") -> ToolResult:
 
         env = os.environ.copy()
         env['PYTHONUTF8'] = '1'
+        env['PYTHONIOENCODING'] = 'utf-8'
 
         workdir = None
         if str(cwd or "").strip():
@@ -71,25 +72,26 @@ def run_cmd(command: str, cwd: str = "") -> ToolResult:
 
         def run_in_powershell(cmd: str):
             ps_command = (
-                "$OutputEncoding = [System.Text.Encoding]::UTF8; "
-                "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
+                "$utf8 = [System.Text.UTF8Encoding]::new($false); "
+                "$OutputEncoding = $utf8; "
+                "[Console]::InputEncoding = $utf8; "
+                "[Console]::OutputEncoding = $utf8; "
+                "chcp.com 65001 > $null 2>&1; "
                 f"{cmd}"
             )
             powershell_exe = shutil.which("powershell") or shutil.which("pwsh") or "powershell"
             return subprocess.run(
                 [powershell_exe, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_command],
                 capture_output=True,
-                text=True,
-                encoding='utf-8',
-                errors='replace',
                 timeout=30,
                 env=env,
                 cwd=workdir,
             )
 
         def run_in_cmd(cmd: str):
+            utf8_command = f"chcp 65001>nul & {cmd}"
             return subprocess.run(
-                ["cmd.exe", "/d", "/s", "/c", cmd],
+                ["cmd.exe", "/d", "/s", "/c", utf8_command],
                 capture_output=True,
                 timeout=30,
                 env=env,
@@ -102,21 +104,31 @@ def run_cmd(command: str, cwd: str = "") -> ToolResult:
             if isinstance(raw_value, str):
                 return raw_value
 
-            encodings: List[str] = []
-            preferred = locale.getpreferredencoding(False)
-            if preferred:
-                encodings.append(preferred)
+            # PowerShell/CMD are explicitly switched to UTF-8 above. Try UTF-8
+            # first, then Windows' OEM and ANSI code pages for native tools that
+            # ignore the parent shell's encoding.
+            encodings: List[str] = ["utf-8"]
 
             if os.name == "nt":
                 try:
                     import ctypes
+                    console_cp = ctypes.windll.kernel32.GetConsoleOutputCP()
+                    if console_cp:
+                        encodings.append(f"cp{console_cp}")
                     oem_cp = ctypes.windll.kernel32.GetOEMCP()
                     if oem_cp:
                         encodings.append(f"cp{oem_cp}")
+                    ansi_cp = ctypes.windll.kernel32.GetACP()
+                    if ansi_cp:
+                        encodings.append(f"cp{ansi_cp}")
                 except Exception:
                     pass
 
-            encodings.extend(["utf-8", "cp866", "cp1251", "latin-1"])
+            encodings.extend(["cp866", "cp1251"])
+            preferred = locale.getpreferredencoding(False)
+            if preferred:
+                encodings.append(preferred)
+            encodings.append("latin-1")
 
             seen = set()
             for encoding_name in encodings:
@@ -192,12 +204,8 @@ def run_cmd(command: str, cwd: str = "") -> ToolResult:
 
         for shell_name, shell_command in shell_order:
             current = run_in_cmd(shell_command) if shell_name == "cmd" else run_in_powershell(shell_command)
-            if shell_name == "cmd":
-                stdout = decode_cmd_output(current.stdout)
-                stderr = decode_cmd_output(current.stderr)
-            else:
-                stdout = current.stdout or ""
-                stderr = current.stderr or ""
+            stdout = decode_cmd_output(current.stdout)
+            stderr = decode_cmd_output(current.stderr)
             success = current.returncode == 0 and is_warning_only(stderr)
             if success and is_false_positive_powershell_success(raw_command, shell_name, stdout, stderr):
                 success = False
@@ -239,8 +247,8 @@ def run_cmd(command: str, cwd: str = "") -> ToolResult:
                 "command": raw_command,
                 "shell": shell_used,
                 "cwd": workdir or os.getcwd(),
-                "stdout": (result.stdout or "")[:5000],
-                "stderr": (result.stderr or "")[:1000],
+                "stdout": stdout[:5000],
+                "stderr": stderr[:1000],
                 "returncode": result.returncode,
                 "attempts": attempts
             },

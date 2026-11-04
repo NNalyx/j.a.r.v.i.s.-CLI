@@ -764,6 +764,25 @@ TOOLS_MAP = {
     "ask_user": ask_user,
 }
 
+# In paired mode these tools operate on the connecting/model device. Device and
+# desktop actions remain on the selected remote target.
+CLIENT_LOCAL_TOOL_NAMES = frozenset({
+    "create_plan",
+    "update_plan",
+    "ask_user",
+    "generate_image",
+    "run_python",
+    "search_text_in_file",
+    "write_file",
+    "list_directory",
+    "read_code",
+    "check_syntax",
+    "edit_code",
+    "list_file",
+    "grep_code",
+    "manage_memory",
+})
+
 if IS_MACOS:
     for _tool_name in _MACOS_EXCLUDED_TOOLS:
         TOOLS_MAP.pop(_tool_name, None)

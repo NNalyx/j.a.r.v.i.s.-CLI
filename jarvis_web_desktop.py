@@ -53,7 +53,7 @@ import config_manager
 import llama_runtime
 from jarvis_core import state
 from jarvis_core.types import ToolResult
-from jarvis_tools.definitions import TOOLS_MAP
+from jarvis_tools.definitions import CLIENT_LOCAL_TOOL_NAMES, TOOLS_MAP
 from jarvis_tools.background import list_background_tasks, stop_background_task
 from jarvis_tools.change_tracking import begin_change_session, finish_change_session, rollback_change
 from jarvis_fast_mode import FastCommandRouter
@@ -3737,7 +3737,6 @@ def api_remote_tools_execute(request: RemoteToolExecuteRequest, http_request: Re
                 for tool in desktop_app.agent.get_active_tools_definition()
             }
             allowed_names = (set(TOOLS_MAP) | {"set_working_directory"}) & advertised_names
-            allowed_names -= {"create_plan", "update_plan", "ask_user", "generate_image"}
             if request.name not in allowed_names:
                 raise HTTPException(status_code=400, detail=f"Инструмент {request.name!r} недоступен на этом устройстве.")
             change_session = begin_change_session()
@@ -4207,25 +4206,26 @@ def api_chat_stream(request: ChatRequest, http_request: Request):
         if not catalog_response.ok or not isinstance(catalog, dict) or not catalog.get("ok"):
             detail = catalog.get("detail", "Не удалось получить инструменты устройства") if isinstance(catalog, dict) else "Устройство вернуло некорректный каталог инструментов."
             raise HTTPException(status_code=502 if catalog_response.ok else catalog_response.status_code, detail=detail)
-        local_tool_names = {"create_plan", "update_plan", "ask_user", "generate_image"}
         local_internal = {
             tool["function"]["name"]: tool
             for tool in desktop_app.agent.get_active_tools_definition()
-            if tool.get("function", {}).get("name") in local_tool_names
+            if tool.get("function", {}).get("name") in CLIENT_LOCAL_TOOL_NAMES
         }
         host_tools = [
             tool for tool in catalog.get("tools", [])
-            if tool.get("function", {}).get("name") not in local_tool_names
+            if tool.get("function", {}).get("name") not in CLIENT_LOCAL_TOOL_NAMES
         ]
         remote_tool_config = {
             "connection": connection,
             "definitions": host_tools + list(local_internal.values()),
             "context": (
                 f"Execution target: paired device {catalog.get('device_name') or connection.get('device_name', 'Jarvis')} "
-                f"running {catalog.get('platform', 'another operating system')}. All system, browser, "
-                f"file, and application tools run on that device, whose home directory is "
-                f"{catalog.get('home') or 'unknown'}. This overrides earlier OS-specific guidance: "
-                "use paths and commands for the execution target. "
+                f"running {catalog.get('platform', 'another operating system')}. System commands, "
+                f"processes, apps, screenshots, and desktop controls run there; its home directory is "
+                f"{catalog.get('home') or 'unknown'}. Code and file tools, Python snippets, memory, "
+                "planning, image generation, and questions remain on this model/client device. "
+                "This overrides earlier OS-specific guidance: use paths and commands for the execution target "
+                "only when calling remote system or desktop tools. "
                 "Conversation, model inference, and planning remain on this computer."
             ),
         }

@@ -6198,7 +6198,7 @@ async function refreshRemoteState() {
         ? ` · Подключены к этому Jarvis: ${data.paired_clients.join(", ")}` : "";
       if (remoteDeviceStatus) remoteDeviceStatus.textContent = clientModeWithoutModel
         ? `Подключено к ${data.device_name || "Jarvis"}. Можно использовать его модель и инструменты.${hostClients}`
-        : `Подключено к ${data.device_name || "Jarvis"}. Модель работает здесь, действия выполняются на выбранном устройстве.${hostClients}`;
+        : `Подключено к ${data.device_name || "Jarvis"}. Файлы и модель остаются здесь, команды и управление рабочим столом выполняются на выбранном устройстве.${hostClients}`;
       remotePairDisconnectBtn?.classList.remove("hidden");
     } else {
       remoteOption?.remove();
@@ -6382,7 +6382,7 @@ if (remotePairConnectForm) {
       executionTargetSelect?.dispatchEvent(new Event("change"));
       if (remoteDeviceStatus) remoteDeviceStatus.textContent = clientModeWithoutModel
         ? `Подключено к ${data.device_name}. Теперь можно пользоваться его моделью.`
-        : `Подключено к ${data.device_name}. Модель остаётся здесь, инструменты запускаются на выбранном устройстве.`;
+        : `Подключено к ${data.device_name}. Файлы и модель остаются здесь; команды и управление рабочим столом запускаются на выбранном устройстве.`;
     } catch (error) {
       if (remoteDeviceStatus) remoteDeviceStatus.textContent = error.message;
     } finally {
