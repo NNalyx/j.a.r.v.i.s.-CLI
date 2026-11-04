@@ -63,6 +63,11 @@ class QwenAgent:
         self.system_prompt = self._build_system_prompt()
         self.app = app  # Ссылка на QwenAgentApp для управления флагами
         self.enabled_tools: Optional[List[str]] = None
+        # Configured for one chat turn when the local model delegates tools to a
+        # paired device. Inference and conversation state stay on this computer.
+        self.remote_tool_executor: Optional[Callable[[str, Dict[str, Any]], ToolResult]] = None
+        self.remote_tool_definitions: Optional[List[Dict[str, Any]]] = None
+        self.remote_execution_context: str = ""
         self.interactive_prompts = bool(getattr(app, "interactive_prompts", True))
         self.last_exact_context_tokens: Optional[int] = None
         self.last_exact_context_source: Optional[str] = None
@@ -230,6 +235,8 @@ class QwenAgent:
         self.enabled_tools = enabled_tools
 
     def get_active_tools_definition(self) -> List[Dict[str, Any]]:
+        if self.remote_tool_definitions is not None:
+            return self.remote_tool_definitions
         if self.enabled_tools is None:
             return TOOLS_DEFINITION
         enabled_set = set(self.enabled_tools)
@@ -462,15 +469,19 @@ When `generate_image` succeeds, include the result as: `(image)[/absolute/path/t
         """Системный промпт + актуальный runtime-контекст (план, cwd, фоновые задачи)."""
         parts = [self.system_prompt]
         runtime = []
-        cwd_ctx = self._cwd_context()
-        if cwd_ctx:
-            runtime.append(cwd_ctx)
+        if not self.remote_execution_context:
+            cwd_ctx = self._cwd_context()
+            if cwd_ctx:
+                runtime.append(cwd_ctx)
         plan_ctx = self._plan_context()
         if plan_ctx:
             runtime.append(plan_ctx)
-        bg_ctx = background_tasks_context()
-        if bg_ctx:
-            runtime.append(bg_ctx)
+        if not self.remote_execution_context:
+            bg_ctx = background_tasks_context()
+            if bg_ctx:
+                runtime.append(bg_ctx)
+        if self.remote_execution_context:
+            runtime.append(self.remote_execution_context)
         if runtime:
             parts.append("## Runtime context")
             parts.extend(runtime)
@@ -1385,6 +1396,9 @@ When `generate_image` succeeds, include the result as: `(image)[/absolute/path/t
         import json as _json
 
         payload = result.to_dict()
+        if isinstance(payload.get("data"), dict) and "remote_screenshot_data_url" in payload["data"]:
+            payload["data"] = dict(payload["data"])
+            payload["data"].pop("remote_screenshot_data_url", None)
         # Если data == None при ошибке — кладём ошибку в data, чтобы модель не увидела null
         if not result.success and result.data is None and result.error:
             payload["data"] = {"error": result.error}
@@ -1403,8 +1417,14 @@ When `generate_image` succeeds, include the result as: `(image)[/absolute/path/t
             return self.create_plan(**args)
         if tool_name == "update_plan":
             return self.update_plan(**args)
-        if tool_name == "set_working_directory":
+        if tool_name == "set_working_directory" and self.remote_tool_executor is None:
             return self.set_working_directory(**args)
+
+        if self.remote_tool_executor is not None and tool_name not in {"ask_user", "generate_image"}:
+            try:
+                return self.remote_tool_executor(tool_name, args)
+            except Exception as exc:
+                return ToolResult(False, None, f"Remote tool execution failed: {exc}")
 
         if tool_name not in TOOLS_MAP:
             return ToolResult(False, None, f"Инструмент '{tool_name}' не найден")
@@ -2654,10 +2674,17 @@ When `generate_image` succeeds, include the result as: `(image)[/absolute/path/t
 
                         # Специальная обработка для take_screenshot — отправляем изображение модели
                         screenshot_base64 = None
+                        screenshot_mime_type = None
                         if tool_name == "take_screenshot" and result.success and isinstance(result.data, dict):
                             img_path = result.data.get("path")
-                            if img_path and os.path.exists(img_path):
+                            remote_image_url = result.data.pop("remote_screenshot_data_url", None)
+                            if isinstance(remote_image_url, str) and remote_image_url.startswith("data:image/") and "," in remote_image_url:
+                                screenshot_mime_type, encoded_image = remote_image_url.split(";base64,", 1) if ";base64," in remote_image_url else ("data:image/png", "")
+                                screenshot_mime_type = screenshot_mime_type.removeprefix("data:")
+                                screenshot_base64 = encoded_image or None
+                            elif img_path and os.path.exists(img_path):
                                 screenshot_base64 = self.encode_image(img_path)
+                                screenshot_mime_type = self.get_mime_type(img_path)
 
                         # Добавляем в историю
                         tool_calls_history.append({
@@ -2681,15 +2708,19 @@ When `generate_image` succeeds, include the result as: `(image)[/absolute/path/t
 
                         # Если это скриншот — добавляем отдельное user-сообщение с изображением для анализа
                         if screenshot_base64:
-                            mime_type = self.get_mime_type(img_path)
+                            mime_type = screenshot_mime_type or "image/png"
+                            screenshot_part = {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:{mime_type};base64,{screenshot_base64}"},
+                            }
+                            if img_path and os.path.exists(img_path):
+                                screenshot_part["file_path"] = img_path
                             tool_calls_history.append({
                                 "role": "user",
                                 "content": [
                                     {"type": "text",
                                      "text": f"Скриншот сделан. Размеры: {result.data.get('width')}x{result.data.get('height')}. Проанализируй изображение:"},
-                                    {"type": "image_url",
-                                     "image_url": {"url": f"data:{mime_type};base64,{screenshot_base64}"},
-                                     "file_path": img_path}
+                                    screenshot_part
                                 ]
                             })
 
@@ -2768,26 +2799,33 @@ When `generate_image` succeeds, include the result as: `(image)[/absolute/path/t
                     # Специальная обработка для take_screenshot — отправляем изображение модели
                     if tool_name == "take_screenshot" and result.success and isinstance(result.data, dict):
                         img_path = result.data.get("path")
-                        if img_path and os.path.exists(img_path):
+                        remote_image_url = result.data.pop("remote_screenshot_data_url", None)
+                        if isinstance(remote_image_url, str) and remote_image_url.startswith("data:image/") and "," in remote_image_url:
+                            screenshot_mime_type, encoded_image = remote_image_url.split(";base64,", 1) if ";base64," in remote_image_url else ("data:image/png", "")
+                            screenshot_base64 = encoded_image or None
+                            screenshot_mime_type = screenshot_mime_type.removeprefix("data:")
+                        elif img_path and os.path.exists(img_path):
                             screenshot_base64 = self.encode_image(img_path)
-                            if screenshot_base64:
-                                mime_type = self.get_mime_type(img_path)
-                                # Добавляем изображение как user-сообщение с content в формате image_url
-                                self.messages.append({
-                                    "role": "user",
-                                    "content": [
-                                        {"type": "text",
-                                         "text": f"Скриншот сделан. Размеры: {result.data.get('width')}x{result.data.get('height')}. Проанализируй изображение:"},
-                                        {"type": "image_url",
-                                         "image_url": {"url": f"data:{mime_type};base64,{screenshot_base64}"},
-                                         "file_path": img_path}
-                                    ]
-                                })
-                            else:
-                                self.messages.append({
-                                    "role": "user",
-                                    "content": f"Результат {tool_name}: {self._format_tool_result_for_model(tool_name, result)}"
-                                })
+                            screenshot_mime_type = self.get_mime_type(img_path)
+                        else:
+                            screenshot_base64 = None
+                            screenshot_mime_type = None
+                        if screenshot_base64:
+                            mime_type = screenshot_mime_type or "image/png"
+                            screenshot_part = {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:{mime_type};base64,{screenshot_base64}"},
+                            }
+                            if img_path and os.path.exists(img_path):
+                                screenshot_part["file_path"] = img_path
+                            self.messages.append({
+                                "role": "user",
+                                "content": [
+                                    {"type": "text",
+                                     "text": f"Скриншот сделан. Размеры: {result.data.get('width')}x{result.data.get('height')}. Проанализируй изображение:"},
+                                    screenshot_part
+                                ]
+                            })
                         else:
                             self.messages.append({
                                 "role": "user",

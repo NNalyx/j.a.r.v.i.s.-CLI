@@ -52,6 +52,8 @@ except ImportError:
 import config_manager
 import llama_runtime
 from jarvis_core import state
+from jarvis_core.types import ToolResult
+from jarvis_tools.definitions import TOOLS_MAP
 from jarvis_tools.background import list_background_tasks, stop_background_task
 from jarvis_tools.change_tracking import begin_change_session, finish_change_session, rollback_change
 from jarvis_fast_mode import FastCommandRouter
@@ -501,6 +503,8 @@ remote_pair_attempts: Dict[str, List[float]] = {}
 remote_peer_tokens: Dict[str, Dict[str, str]] = {}
 remote_chat_ids: Dict[tuple, str] = {}
 remote_connection: Optional[Dict[str, str]] = None
+remote_activity_lock = threading.RLock()
+remote_activity_count = 0
 DISCOVERY_SERVICE_TYPE = "_jarvis._tcp.local."
 DISCOVERY_INSTANCE_ID = uuid.uuid4().hex
 remote_discovery_lock = threading.RLock()
@@ -668,7 +672,11 @@ async def api_token_middleware(request, call_next):
         token = request.headers.get("X-API-Token") or request.query_params.get("token")
         api_ok = bool(token and secrets.compare_digest(token, API_TOKEN))
         remote_ok = False
-        if token and path in {"/api/chat/stream", "/api/chat/stop", "/api/user-response", "/api/changes/rollback", "/api/remote/peer"}:
+        if token and path in {
+            "/api/chat/stream", "/api/chat/stop", "/api/user-response",
+            "/api/changes/rollback", "/api/remote/peer",
+            "/api/remote/tools/catalog", "/api/remote/tools/execute",
+        }:
             with remote_pair_lock:
                 remote_ok = token in remote_peer_tokens
             if remote_ok:
@@ -693,6 +701,7 @@ class ChatRequest(BaseModel):
     message: str
     images: List[str] = Field(default_factory=list)
     chat_id: Optional[str] = None
+    tool_target: str = "local"
 
 
 class RemotePairClaimRequest(BaseModel):
@@ -708,6 +717,11 @@ class RemotePairConnectRequest(BaseModel):
 class RemoteProxyRequest(BaseModel):
     prompt_id: Optional[str] = None
     answer: Optional[str] = None
+
+
+class RemoteToolExecuteRequest(BaseModel):
+    name: str
+    arguments: Dict[str, Any] = Field(default_factory=dict)
 
 
 class RollbackChangeRequest(BaseModel):
@@ -3691,17 +3705,74 @@ def api_remote_discovery():
     return {"ok": True, "available": True, "devices": devices}
 
 
+@app.get("/api/remote/tools/catalog")
+def api_remote_tools_catalog(request: Request):
+    if not getattr(request.state, "remote_peer_id", None):
+        raise HTTPException(status_code=403, detail="Требуется сопряжённое устройство.")
+    platform_name = "Windows" if sys.platform == "win32" else ("macOS" if sys.platform == "darwin" else sys.platform)
+    with chat_lock:
+        tools = desktop_app.agent.get_active_tools_definition()
+    return {
+        "ok": True,
+        "device_name": socket.gethostname(),
+        "platform": platform_name,
+        "home": str(Path.home()),
+        "tools": _make_json_safe(tools),
+    }
+
+
+@app.post("/api/remote/tools/execute")
+def api_remote_tools_execute(request: RemoteToolExecuteRequest, http_request: Request):
+    global remote_activity_count
+    if not getattr(http_request.state, "remote_peer_id", None):
+        raise HTTPException(status_code=403, detail="Требуется сопряжённое устройство.")
+    with remote_activity_lock:
+        remote_activity_count += 1
+    try:
+        # Reuse the normal host-side tool runner so path handling and result
+        # formatting match actions started directly from this computer.
+        with chat_lock:
+            advertised_names = {
+                tool.get("function", {}).get("name")
+                for tool in desktop_app.agent.get_active_tools_definition()
+            }
+            allowed_names = (set(TOOLS_MAP) | {"set_working_directory"}) & advertised_names
+            allowed_names -= {"create_plan", "update_plan", "ask_user", "generate_image"}
+            if request.name not in allowed_names:
+                raise HTTPException(status_code=400, detail=f"Инструмент {request.name!r} недоступен на этом устройстве.")
+            change_session = begin_change_session()
+            try:
+                result = desktop_app.agent.execute_tool(request.name, request.arguments)
+            finally:
+                change_result = finish_change_session(change_session)
+        if not isinstance(result, ToolResult):
+            result = ToolResult(False, None, "Инструмент вернул неподдерживаемый результат.")
+        result_data = result.data
+        if request.name == "take_screenshot" and result.success and isinstance(result_data, dict):
+            result_data = dict(result_data)
+            screenshot_url = _image_file_to_data_url(result_data.get("path"))
+            if screenshot_url:
+                result_data["remote_screenshot_data_url"] = screenshot_url
+        return JSONResponse(content=_make_json_safe({
+            "ok": True,
+            "result": {"success": result.success, "data": result_data, "error": result.error},
+            "changes": change_result,
+        }))
+    finally:
+        with remote_activity_lock:
+            remote_activity_count = max(0, remote_activity_count - 1)
+
+
+@app.get("/api/remote/activity")
+def api_remote_activity():
+    with remote_activity_lock:
+        active = remote_activity_count > 0
+    return {"ok": True, "active": active}
+
+
 @app.post("/api/remote/pair/start")
 def api_remote_pair_start():
     global remote_pair_code, remote_pair_expires
-    if not desktop_app.agent.check_health():
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Чтобы показать код, запустите модель на этом компьютере-хозяине. "
-                "На клиентском компьютере без модели код не создаётся: введите там код, показанный хозяином."
-            ),
-        )
     with remote_pair_lock:
         remote_pair_code = f"{secrets.randbelow(1_000_000):06d}"
         remote_pair_expires = time.time() + 180
@@ -4121,6 +4192,49 @@ def api_chat_stream(request: ChatRequest, http_request: Request):
     if not desktop_app.agent.check_health():
         raise HTTPException(status_code=503, detail="Llama server is offline. Start a model first.")
 
+    remote_tool_config = None
+    if request.tool_target == "remote":
+        connection = _remote_connection_or_error()
+        try:
+            catalog_response = requests.get(
+                f"{connection['host']}/api/remote/tools/catalog",
+                headers={"X-API-Token": connection["token"]},
+                timeout=8,
+            )
+            catalog = catalog_response.json()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Не удалось получить инструменты удалённого устройства: {exc}") from exc
+        if not catalog_response.ok or not isinstance(catalog, dict) or not catalog.get("ok"):
+            detail = catalog.get("detail", "Не удалось получить инструменты устройства") if isinstance(catalog, dict) else "Устройство вернуло некорректный каталог инструментов."
+            raise HTTPException(status_code=502 if catalog_response.ok else catalog_response.status_code, detail=detail)
+        local_tool_names = {"create_plan", "update_plan", "ask_user", "generate_image"}
+        local_internal = {
+            tool["function"]["name"]: tool
+            for tool in desktop_app.agent.get_active_tools_definition()
+            if tool.get("function", {}).get("name") in local_tool_names
+        }
+        host_tools = [
+            tool for tool in catalog.get("tools", [])
+            if tool.get("function", {}).get("name") not in local_tool_names
+        ]
+        remote_tool_config = {
+            "connection": connection,
+            "definitions": host_tools + list(local_internal.values()),
+            "context": (
+                f"Execution target: paired device {catalog.get('device_name') or connection.get('device_name', 'Jarvis')} "
+                f"running {catalog.get('platform', 'another operating system')}. All system, browser, "
+                f"file, and application tools run on that device, whose home directory is "
+                f"{catalog.get('home') or 'unknown'}. This overrides earlier OS-specific guidance: "
+                "use paths and commands for the execution target. "
+                "Conversation, model inference, and planning remain on this computer."
+            ),
+        }
+        if not remote_tool_config["definitions"]:
+            raise HTTPException(status_code=502, detail="На удалённом устройстве не найдено доступных инструментов.")
+    elif request.tool_target != "local":
+        raise HTTPException(status_code=400, detail="Неизвестное место выполнения инструментов.")
+
+    remote_change_files: List[Dict[str, Any]] = []
     bridge = WebStreamBridge()
 
     def event_generator():
@@ -4165,7 +4279,47 @@ def api_chat_stream(request: ChatRequest, http_request: Request):
                             )
 
                 change_session = begin_change_session()
+
+                def finish_current_change_review():
+                    review = finish_change_session(change_session)
+                    review["files"].extend(remote_change_files)
+                    return review
+
                 with bridge.patched():
+                    previous_remote_executor = desktop_app.agent.remote_tool_executor
+                    previous_remote_definitions = desktop_app.agent.remote_tool_definitions
+                    previous_remote_context = desktop_app.agent.remote_execution_context
+                    if remote_tool_config:
+                        remote_connection_info = remote_tool_config["connection"]
+
+                        def execute_on_remote(tool_name, arguments):
+                            try:
+                                tool_response = requests.post(
+                                    f"{remote_connection_info['host']}/api/remote/tools/execute",
+                                    headers={"X-API-Token": remote_connection_info["token"]},
+                                    json={"name": tool_name, "arguments": arguments},
+                                    timeout=(8, 300),
+                                )
+                                tool_payload = tool_response.json()
+                            except Exception as exc:
+                                return ToolResult(False, None, f"Не удалось выполнить действие на удалённом устройстве: {exc}")
+                            if not tool_response.ok or not tool_payload.get("ok"):
+                                return ToolResult(False, None, tool_payload.get("detail", "Удалённое устройство отклонило действие"))
+                            result_payload = tool_payload.get("result", {})
+                            changes_payload = tool_payload.get("changes", {})
+                            for changed_file in changes_payload.get("files", []) or []:
+                                remote_file = dict(changed_file)
+                                remote_file["remote_session_id"] = changes_payload.get("id")
+                                remote_change_files.append(remote_file)
+                            return ToolResult(
+                                bool(result_payload.get("success")),
+                                result_payload.get("data"),
+                                result_payload.get("error"),
+                            )
+
+                        desktop_app.agent.remote_tool_executor = execute_on_remote
+                        desktop_app.agent.remote_tool_definitions = remote_tool_config["definitions"]
+                        desktop_app.agent.remote_execution_context = remote_tool_config["context"]
                     try:
                         for result in desktop_app.agent.send_message(
                                 message,
@@ -4175,7 +4329,7 @@ def api_chat_stream(request: ChatRequest, http_request: Request):
                         ):
                             if result.get("type") == "final":
                                 final_content = result.get("content", "")
-                                change_result = finish_change_session(change_session)
+                                change_result = finish_current_change_review()
                                 bridge.push(
                                     "final",
                                     content=final_content,
@@ -4201,7 +4355,7 @@ def api_chat_stream(request: ChatRequest, http_request: Request):
                             bridge.push("error", message=error_message)
                     finally:
                         if change_session is not None and change_result is None:
-                            change_result = finish_change_session(change_session)
+                            change_result = finish_current_change_review()
                         with active_stream_lock:
                             if active_stream_bridge is bridge:
                                 active_stream_bridge = None
@@ -4214,6 +4368,10 @@ def api_chat_stream(request: ChatRequest, http_request: Request):
                         final_content_for_tts = (bridge.last_content_clean or "").strip()
                         if final_content_for_tts:
                             _speak_assistant_response_async(final_content_for_tts)
+                        desktop_app.agent.remote_tool_executor = previous_remote_executor
+                        desktop_app.agent.remote_tool_definitions = previous_remote_definitions
+                        desktop_app.agent.remote_execution_context = previous_remote_context
+                        desktop_app.agent.refresh_system_prompt()
                         # Очищаем оставшиеся события инструментов при завершении сессии
                         bridge.tool_events.clear()
                         bridge._tool_call_ids.clear()

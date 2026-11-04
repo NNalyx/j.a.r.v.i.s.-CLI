@@ -56,7 +56,8 @@ body {
 }
 .execution-target-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .72; }
 
-.remote-working::after {
+.remote-working::after,
+.remote-being-controlled::after {
   position: fixed;
   z-index: 9998;
   inset: 5px;

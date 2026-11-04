@@ -179,7 +179,8 @@ document.getElementById("changes-rollback-btn")?.addEventListener("click", async
   const status = document.getElementById("changes-status");
   button.disabled = true;
   try {
-    const response = await fetch(executionTargetSelect?.value === "remote" ? "/api/remote/changes/rollback" : "/api/changes/rollback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: activeChangeReview.id, path: file.path }) });
+    const isRemoteFile = Boolean(file.remote_session_id);
+    const response = await fetch(isRemoteFile ? "/api/remote/changes/rollback" : "/api/changes/rollback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: file.remote_session_id || activeChangeReview.id, path: file.path }) });
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || "Не удалось откатить файл");
     file.rollback_available = false;
@@ -414,7 +415,7 @@ function setSendButtonMode(mode) {
 
 function setGeneratingState(nextState, estimatedTokens = 0) {
   isGeneratingResponse = Boolean(nextState);
-  document.body.classList.toggle("remote-working", isGeneratingResponse && executionTargetSelect?.value === "remote");
+  document.body.classList.toggle("remote-working", isGeneratingResponse && clientModeWithoutModel && executionTargetSelect?.value === "remote");
   if (!isGeneratingResponse) {
     liveStatus?.classList.remove("is-compacting");
     liveStatusProgress?.classList.remove("is-indeterminate");
@@ -423,7 +424,7 @@ function setGeneratingState(nextState, estimatedTokens = 0) {
     stopContextRefreshTimer();
   } else {
     startGenerationProgress(estimatedTokens);
-    if (executionTargetSelect?.value !== "remote") startContextRefreshTimer();
+    if (!clientModeWithoutModel || executionTargetSelect?.value !== "remote") startContextRefreshTimer();
   }
   setSendButtonMode(isGeneratingResponse ? "stop" : "send");
 }
@@ -551,7 +552,8 @@ async function requestStopGeneration() {
   setLiveStatus("Останавливаю ответ...", true);
 
   try {
-    await fetch(executionTargetSelect?.value === "remote" ? "/api/remote/chat/stop" : "/api/chat/stop", { method: "POST" });
+    const useRemoteModel = clientModeWithoutModel && executionTargetSelect?.value === "remote";
+    await fetch(useRemoteModel ? "/api/remote/chat/stop" : "/api/chat/stop", { method: "POST" });
   } catch (error) {
     stopRequestInFlight = false;
     addMessage("system", `Не удалось остановить ответ: ${error.message}`);
@@ -617,7 +619,8 @@ async function submitUserPrompt(answer) {
     return;
   }
   try {
-    await fetch(executionTargetSelect?.value === "remote" ? "/api/remote/user-response" : "/api/user-response", {
+    const useRemoteModel = clientModeWithoutModel && executionTargetSelect?.value === "remote";
+    await fetch(useRemoteModel ? "/api/remote/user-response" : "/api/user-response", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt_id: activeUserPromptId, answer }),
@@ -5578,10 +5581,12 @@ async function runChatStream(message, images, options = {}) {
   }
 
   try {
-    const response = await fetch(executionTargetSelect?.value === "remote" ? "/api/remote/chat/stream" : "/api/chat/stream", {
+    const useRemoteModel = clientModeWithoutModel && executionTargetSelect?.value === "remote";
+    const delegateToolsToRemote = !clientModeWithoutModel && executionTargetSelect?.value === "remote";
+    const response = await fetch(useRemoteModel ? "/api/remote/chat/stream" : "/api/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, images, chat_id: currentChatId }),
+      body: JSON.stringify({ message, images, chat_id: currentChatId, tool_target: delegateToolsToRemote ? "remote" : "local" }),
     });
 
     if (!response.ok) {
@@ -5953,9 +5958,9 @@ async function sendMessage(event) {
     return;
   }
 
-  // A remote request runs on the host, so check permissions on this machine
-  // only when this device is the execution target.
-  if (executionTargetSelect?.value !== "remote") runSystemCheck();
+  // In the model-less client mode, the paired host handles the whole request.
+  // Otherwise the local model runs here and only tool calls go to the target.
+  if (!clientModeWithoutModel || executionTargetSelect?.value !== "remote") runSystemCheck();
 
   if (!currentChatId) {
     await createNewChat();
@@ -5963,7 +5968,7 @@ async function sendMessage(event) {
 
   // Estimate prompt size so the prefill progress bar can advance even when
   // llama-server does not stream real slot progress.
-  const contextData = executionTargetSelect?.value === "remote" ? null : await refreshContext();
+  const contextData = clientModeWithoutModel && executionTargetSelect?.value === "remote" ? null : await refreshContext();
   const estimatedTokens = contextData?.used || 0;
 
   addMessage("user", message, { images });
@@ -6191,7 +6196,9 @@ async function refreshRemoteState() {
       if (option) option.textContent = data.device_name || "Подключённый Jarvis";
       const hostClients = Array.isArray(data.paired_clients) && data.paired_clients.length
         ? ` · Подключены к этому Jarvis: ${data.paired_clients.join(", ")}` : "";
-      if (remoteDeviceStatus) remoteDeviceStatus.textContent = `Подключено к ${data.device_name || "Jarvis"}. Доступны его модель и инструменты.${hostClients}`;
+      if (remoteDeviceStatus) remoteDeviceStatus.textContent = clientModeWithoutModel
+        ? `Подключено к ${data.device_name || "Jarvis"}. Можно использовать его модель и инструменты.${hostClients}`
+        : `Подключено к ${data.device_name || "Jarvis"}. Модель работает здесь, действия выполняются на выбранном устройстве.${hostClients}`;
       remotePairDisconnectBtn?.classList.remove("hidden");
     } else {
       remoteOption?.remove();
@@ -6216,6 +6223,24 @@ async function refreshRemoteState() {
 }
 
 refreshRemoteState();
+
+let remoteActivityRefreshInFlight = false;
+async function refreshRemoteActivity() {
+  if (remoteActivityRefreshInFlight) return;
+  remoteActivityRefreshInFlight = true;
+  try {
+    const response = await fetch("/api/remote/activity", { cache: "no-store" });
+    const data = await response.json();
+    if (response.ok && data.ok) document.body.classList.toggle("remote-being-controlled", Boolean(data.active));
+  } catch (_) {
+    // The activity indicator is best-effort and must not interrupt the chat UI.
+  } finally {
+    remoteActivityRefreshInFlight = false;
+  }
+}
+
+refreshRemoteActivity();
+setInterval(refreshRemoteActivity, 500);
 
 async function refreshRemoteDevices() {
   if (!remoteDiscoveryList || !remoteDiscoveryStatus) return;
@@ -6288,8 +6313,8 @@ if (executionTargetSelect) {
           ? "Нет локальной модели · подключитесь к хозяину"
           : "Локальная модель");
     }
-    document.body.classList.toggle("remote-working", isGeneratingResponse && executionTargetSelect.value === "remote");
-    if (executionTargetSelect.value === "remote") stopContextRefreshTimer();
+    document.body.classList.toggle("remote-working", isGeneratingResponse && clientModeWithoutModel && executionTargetSelect.value === "remote");
+    if (clientModeWithoutModel && executionTargetSelect.value === "remote") stopContextRefreshTimer();
     else if (isGeneratingResponse) startContextRefreshTimer();
   });
 }
@@ -6299,7 +6324,7 @@ if (remotePairStartBtn) {
     remotePairStartBtn.disabled = true;
     remotePairStartBtn.textContent = "Создаю код…";
     remotePairCodeWrap?.classList.add("hidden");
-    if (remoteDeviceStatus) remoteDeviceStatus.textContent = "Проверяю модель на этом компьютере и создаю код…";
+    if (remoteDeviceStatus) remoteDeviceStatus.textContent = "Создаю код подключения для этого устройства…";
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);
     try {
@@ -6309,7 +6334,7 @@ if (remotePairStartBtn) {
       if (remotePairAddress) remotePairAddress.textContent = `Адрес: ${data.address}`;
       if (remotePairCode) remotePairCode.textContent = data.code;
       remotePairCodeWrap?.classList.remove("hidden");
-      if (remoteDeviceStatus) remoteDeviceStatus.textContent = "Покажите этот код клиентскому устройству. Код действует три минуты.";
+      if (remoteDeviceStatus) remoteDeviceStatus.textContent = "Покажите код компьютеру, с которого подключаетесь. Код действует три минуты.";
       let remaining = Number(data.expires_in) || 180;
       clearInterval(remotePairCountdownTimer);
       const tick = () => {
@@ -6324,7 +6349,7 @@ if (remotePairStartBtn) {
       remotePairCountdownTimer = setInterval(tick, 1000);
     } catch (error) {
       const message = error.name === "AbortError"
-        ? "Не дождался ответа Jarvis. Проверьте, что приложение и модель запущены, затем попробуйте снова."
+        ? "Не дождался ответа Jarvis. Проверьте, что приложение запущено, затем попробуйте снова."
         : error.message;
       if (remoteDeviceStatus) remoteDeviceStatus.textContent = message;
     } finally {
@@ -6355,7 +6380,9 @@ if (remotePairConnectForm) {
       await refreshRemoteState();
       if (executionTargetSelect) executionTargetSelect.value = "remote";
       executionTargetSelect?.dispatchEvent(new Event("change"));
-      if (remoteDeviceStatus) remoteDeviceStatus.textContent = `Подключено к ${data.device_name}. Jarvis получил полный доступ к этому устройству.`;
+      if (remoteDeviceStatus) remoteDeviceStatus.textContent = clientModeWithoutModel
+        ? `Подключено к ${data.device_name}. Теперь можно пользоваться его моделью.`
+        : `Подключено к ${data.device_name}. Модель остаётся здесь, инструменты запускаются на выбранном устройстве.`;
     } catch (error) {
       if (remoteDeviceStatus) remoteDeviceStatus.textContent = error.message;
     } finally {
