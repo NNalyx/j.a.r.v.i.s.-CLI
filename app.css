@@ -3540,6 +3540,16 @@ button:disabled {
   padding: 14px 18px;
 }
 
+.client-mode-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  margin-top: 12px;
+}
+
+.client-mode-actions .hint {
+  margin: 0;
+}
+
 .preset-card-list {
   display: flex;
   flex-direction: column;

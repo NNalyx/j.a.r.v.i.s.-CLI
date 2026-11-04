@@ -59,6 +59,8 @@ const presetNglInput = document.getElementById("preset-ngl-input");
 const presetPortInput = document.getElementById("preset-port-input");
 const presetSaveBtn = document.getElementById("preset-save-btn");
 const presetSetupLead = document.getElementById("preset-setup-lead");
+const continueWithoutModelSetupBtn = document.getElementById("continue-without-model-setup-btn");
+const continueWithoutModelLaunchBtn = document.getElementById("continue-without-model-launch-btn");
 const presetCardList = document.getElementById("preset-card-list");
 const presetAddBtn = document.getElementById("preset-add-btn");
 const toolsList = document.getElementById("tools-list");
@@ -111,6 +113,8 @@ const remoteDiscoveryStatus = document.getElementById("remote-discovery-status")
 const remoteDiscoveryList = document.getElementById("remote-discovery-list");
 const remoteDeviceStatus = document.getElementById("remote-device-status");
 const remotePairDisconnectBtn = document.getElementById("remote-pair-disconnect-btn");
+let clientModeWithoutModel = false;
+let updateCheckStarted = false;
 const voiceRecordingStatus = document.getElementById("voice-recording-status");
 const voiceRecordingLabel = document.getElementById("voice-recording-label");
 const voiceRecordingTranscript = document.getElementById("voice-recording-transcript");
@@ -895,6 +899,8 @@ function setUpdateModalOpen(open) {
 }
 
 async function checkForUpdate() {
+  if (updateCheckStarted) return;
+  updateCheckStarted = true;
   try {
     const response = await fetch("/api/update/check");
     const data = await response.json();
@@ -5395,6 +5401,41 @@ async function enterMainInterface() {
   syncEmptyChatState();
 }
 
+async function startClientModeWithoutModel() {
+  const buttons = [continueWithoutModelSetupBtn, continueWithoutModelLaunchBtn].filter(Boolean);
+  if (buttons.some((button) => button.disabled)) return;
+  buttons.forEach((button) => { button.disabled = true; });
+  clientModeWithoutModel = true;
+  try {
+    if (startupSubtitle) startupSubtitle.textContent = "Запускаю режим клиентского устройства…";
+    loadingStatusText.textContent = "Готовлю Jarvis без локальной модели…";
+    await loadModels();
+    await loadAsrBackends();
+    await loadChats();
+    await pollVoiceState();
+    await loadToolsCatalog();
+    await refreshBackgroundTasks();
+    await refreshActivePlan();
+    await refreshTelegramAccountStatus();
+    renderPresetCards();
+    renderToolsList();
+    if (executionTargetSelect) executionTargetSelect.value = "local";
+    if (executionTargetStatus) executionTargetStatus.textContent = "Нет локальной модели · подключитесь к хозяину";
+    setLoadingMode("launch");
+    loadingScreen?.classList.remove("hidden");
+    await enterMainInterface();
+    if (currentChatId) await openChat(currentChatId);
+    else clearChatLog();
+  } catch (error) {
+    clientModeWithoutModel = false;
+    loadingScreen?.classList.remove("hidden");
+    if (startupSubtitle) startupSubtitle.textContent = "Не удалось запустить клиентский режим";
+    loadingStatusText.textContent = error.message || "Ошибка запуска";
+  } finally {
+    buttons.forEach((button) => { button.disabled = false; });
+  }
+}
+
 async function startModelFromLoadingScreen() {
   if (!loadingStartBtn || !loadingModelSelect) return;
 
@@ -5907,9 +5948,14 @@ async function sendMessage(event) {
   if (!message && !images.length) {
     return;
   }
+  if (clientModeWithoutModel && executionTargetSelect?.value !== "remote") {
+    addMessage("system", "Сначала подключите компьютер-хозяин в Настройки → Другие устройства Jarvis или выберите удалённое устройство.");
+    return;
+  }
 
-  // Проверяем системные разрешения при каждой отправке сообщения
-  runSystemCheck();
+  // A remote request runs on the host, so check permissions on this machine
+  // only when this device is the execution target.
+  if (executionTargetSelect?.value !== "remote") runSystemCheck();
 
   if (!currentChatId) {
     await createNewChat();
@@ -6160,7 +6206,9 @@ async function refreshRemoteState() {
     if (executionTargetStatus) {
       executionTargetStatus.textContent = executionTargetSelect?.value === "remote"
         ? `Удалённо · ${data.device_name || "Jarvis"}`
-        : "Локальная модель";
+        : (clientModeWithoutModel
+          ? "Нет локальной модели · подключитесь к хозяину"
+          : "Локальная модель");
     }
   } catch (error) {
     if (remoteDeviceStatus) remoteDeviceStatus.textContent = `Не удалось проверить подключение: ${error.message}`;
@@ -6236,7 +6284,9 @@ if (executionTargetSelect) {
       const option = executionTargetSelect.selectedOptions[0];
       executionTargetStatus.textContent = executionTargetSelect.value === "remote"
         ? `Удалённо · ${option?.textContent || "Jarvis"}`
-        : "Локальная модель";
+        : (clientModeWithoutModel
+          ? "Нет локальной модели · подключитесь к хозяину"
+          : "Локальная модель");
     }
     document.body.classList.toggle("remote-working", isGeneratingResponse && executionTargetSelect.value === "remote");
     if (executionTargetSelect.value === "remote") stopContextRefreshTimer();
@@ -6486,6 +6536,7 @@ async function startUsualMode(status) {
   if (!status) {
     status = await loadConfigStatus();
   }
+  checkForUpdate();
   if (status?.needs_setup) {
     loadingScreen?.classList.remove("hidden");
     setLoadingMode("setup");
@@ -6510,7 +6561,6 @@ async function startUsualMode(status) {
   renderToolsList();
   setLoadingMode("launch");
   if (startupSubtitle) startupSubtitle.textContent = "Выберите модель и запустите Jarvis";
-  checkForUpdate();
   checkLlamaServerUpdate();
   const isOnline = await refreshHealth();
   if (isOnline) {
@@ -6527,6 +6577,8 @@ async function startUsualMode(status) {
 }
 
 if (modelBootRetryBtn) modelBootRetryBtn.addEventListener("click", startModelFromLoadingScreen);
+continueWithoutModelSetupBtn?.addEventListener("click", startClientModeWithoutModel);
+continueWithoutModelLaunchBtn?.addEventListener("click", startClientModeWithoutModel);
 if (modelBootBackBtn) {
   modelBootBackBtn.addEventListener("click", () => {
     modelBootScreen?.classList.add("hidden");

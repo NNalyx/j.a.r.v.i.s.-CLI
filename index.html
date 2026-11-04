@@ -188,6 +188,10 @@
           Укажите параметры пресета. Пресет сохранится в
           <code>jarvis_config.json</code> на этом компьютере.
         </p>
+        <div class="loading-actions client-mode-actions">
+          <button id="continue-without-model-setup-btn" type="button" class="ghost">Продолжить без модели</button>
+          <p class="hint">Для клиентского компьютера: подключитесь к Jarvis на компьютере-хозяине, модель здесь не нужна.</p>
+        </div>
         <form id="preset-setup-form" class="preset-form">
           <label class="label" for="preset-name-input">Название пресета</label>
           <input id="preset-name-input" class="text-input" type="text" placeholder="Например, Qwen 3.5 9B">
@@ -336,6 +340,7 @@
         <div class="loading-actions">
           <button id="loading-start-btn" class="primary">Запустить сервер модели</button>
           <button id="preset-add-btn" type="button" class="ghost">+ Новый пресет</button>
+          <button id="continue-without-model-launch-btn" type="button" class="ghost">Продолжить без модели</button>
         </div>
       </section>
       
@@ -801,6 +806,6 @@
   </template>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-  <script src="/static/app.js?v=57"></script>
+  <script src="/static/app.js?v=58"></script>
 </body>
 </html>
