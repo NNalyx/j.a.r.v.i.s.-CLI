@@ -333,19 +333,33 @@ TOOLS_DEFINITION = [
     {
         "type": "function",
         "function": {
+            "name": "transcribe_video",
+            "description": "Transcribe speech from a local video or audio file using the GigaAM Multilingual model already installed and used by Jarvis voice input. Pass the full file path. Supports media formats readable by ffmpeg. Returns the transcript text to you so you can summarize, answer questions, or quote it. Does not download another model or write output files.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Full path to a local video/audio file, for example /Users/roma/Movies/lecture.mp4"}
+                },
+                "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "manage_memory",
-            "description": "Read or change Jarvis's persistent memory. Use only when the user asks to remember/update/forget something or explicitly asks what is remembered. Choose read, write, append, or clear; write replaces the memory, append preserves existing entries. Never store secrets or credentials.",
+            "description": "Search or change Jarvis's persistent local vector memory. Use search for a specific remembered fact, read only when the user asks to list everything, write to replace memory, append to add facts, or clear to forget everything. Never store secrets or credentials.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "operation": {
                         "type": "string",
-                        "description": "Operation: read, write, append, clear",
-                        "enum": ["read", "write", "append", "clear"]
+                        "description": "Operation: search, read, write, append, clear",
+                        "enum": ["search", "read", "write", "append", "clear"]
                     },
                     "content": {
                         "type": "string",
-                        "description": "Content to write/append (required for write and append)"
+                        "description": "For search, the retrieval query; for write/append, the memory text to save"
                     }
                 },
                 "required": ["operation"]
@@ -615,7 +629,7 @@ PLANNING_TOOLS = [
         "type": "function",
         "function": {
             "name": "create_plan",
-            "description": "Create a numbered plan for a genuinely complex task with several dependent stages (typically more than 3 meaningful actions). Do not use for routine code edits, a single lookup, or simple requests. The plan is injected into later requests.",
+            "description": "Create a numbered plan for a genuinely complex task with several dependent stages (typically more than 3 meaningful actions). The first step automatically starts as in_progress; no follow-up update_plan call is needed. Do not use for routine code edits, a single lookup, or simple requests. The plan is included in later request context.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -634,7 +648,7 @@ PLANNING_TOOLS = [
         "type": "function",
         "function": {
             "name": "update_plan",
-            "description": "Update a step in the current active plan. Use only if a plan exists; mark the current step in_progress when starting and done when completed. Do not create/update plans for simple tasks.",
+            "description": "Update a step in the current active plan. Use only if a plan exists; mark a step in_progress when starting and done when completed. Marking a step done automatically moves the next pending step to in_progress, so no second update_plan call is needed. Do not create/update plans for simple tasks.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -642,7 +656,7 @@ PLANNING_TOOLS = [
                     "status": {
                         "type": "string",
                         "enum": ["pending", "in_progress", "done"],
-                        "description": "New status for the step"
+                    "description": "New status. Marking the current step done automatically starts the next pending step."
                     }
                 },
                 "required": ["step_id", "status"]
@@ -715,6 +729,7 @@ from .user_prompt import ask_user
 from .wait import wait
 from .web import read_url, search_web
 from .find_person import find_person
+from .transcribe_media import transcribe_video
 
 def _planning_tool_stub(**kwargs) -> ToolResult:
     return ToolResult(False, None, "This tool is handled by the agent directly.")
@@ -725,6 +740,7 @@ TOOLS_MAP = {
     "update_plan": _planning_tool_stub,
     "set_working_directory": _planning_tool_stub,
     "generate_image": generate_image,
+    "transcribe_video": transcribe_video,
     "search_web": search_web,
     "find_person": find_person,
     "read_url": read_url,
@@ -771,6 +787,7 @@ CLIENT_LOCAL_TOOL_NAMES = frozenset({
     "update_plan",
     "ask_user",
     "generate_image",
+    "transcribe_video",
     "run_python",
     "search_text_in_file",
     "write_file",

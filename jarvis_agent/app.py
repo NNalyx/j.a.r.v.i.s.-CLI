@@ -17,7 +17,7 @@ from jarvis_core.config import LLAMA_SERVER_PRESETS
 from jarvis_core.constants import (
     DEFAULT_MODEL_KEY,
     DEFAULT_TRANSCRIPTION_BACKEND_KEY,
-    MEMORY_FILE,
+    MEMORY_DB_FILE,
     TELEGRAM_AVAILABLE,
     TelegramBotManager,
     VOICE_AVAILABLE,
@@ -84,13 +84,10 @@ class QwenAgentApp:
             self._init_telegram()
 
     def _init_memory(self):
-        """Проверить и создать файл памяти если не существует"""
+        """Инициализировать локальную SQLite-память и импортировать старый JSON."""
         try:
-            if not os.path.exists(MEMORY_FILE):
-                MemoryManager.write("Память пуста. Нет сохраненной информации о пользователе или сессиях.")
-                print(f"{Colors.BRIGHT_GREEN}[MEMORY] Файл памяти создан: {MEMORY_FILE}{Colors.RESET}")
-            else:
-                print(f"{Colors.BRIGHT_GREEN}[MEMORY] Память загружена из: {MEMORY_FILE}{Colors.RESET}")
+            MemoryManager.read()
+            print(f"{Colors.BRIGHT_GREEN}[MEMORY] Локальная векторная память загружена: {MEMORY_DB_FILE}{Colors.RESET}")
         except Exception as e:
             print(f"{Colors.YELLOW}[MEMORY] Предупреждение: не удалось инициализировать память: {e}{Colors.RESET}")
 
@@ -525,6 +522,13 @@ class QwenAgentApp:
             app=self,
             max_tokens=int(preset.get("max_tokens", 8192)),
             temperature=float(preset.get("temperature", 0.7)),
+            top_p=float(preset.get("top_p", 0.9)),
+            top_k=preset.get("top_k"),
+            min_p=float(preset.get("min_p", 0.05)),
+            repeat_penalty=float(preset.get("repeat_penalty", 1.15)),
+            frequency_penalty=float(preset.get("frequency_penalty", 0.1)),
+            presence_penalty=float(preset.get("presence_penalty", 0.1)),
+            reasoning_effort=preset.get("reasoning_effort"),
             context_size=int(preset.get("context_size", 32768)),
             backend=str(preset.get("backend", "llama-server")),
             system_prompt_mode=preset.get("system_prompt_mode", "full"),
@@ -549,6 +553,14 @@ class QwenAgentApp:
         self.agent.max_tokens = int(preset.get("max_tokens", 8192))
         self.agent.context_size = int(preset.get("context_size", 32768))
         self.agent.temperature = float(preset.get("temperature", 0.7))
+        self.agent.top_p = float(preset.get("top_p", 0.9))
+        top_k = preset.get("top_k")
+        self.agent.top_k = int(top_k) if top_k is not None and int(top_k) > 0 else None
+        self.agent.min_p = float(preset.get("min_p", 0.05))
+        self.agent.repeat_penalty = float(preset.get("repeat_penalty", 1.15))
+        self.agent.frequency_penalty = float(preset.get("frequency_penalty", 0.1))
+        self.agent.presence_penalty = float(preset.get("presence_penalty", 0.1))
+        self.agent.reasoning_effort = str(preset.get("reasoning_effort") or "").strip().lower() or None
         self.agent.backend = backend
         self.agent.native_tools_enabled = backend not in {"mlx-vlm", "mlx-optiq", "mtplx"}
         new_mode = preset.get("system_prompt_mode", "full")
@@ -672,6 +684,8 @@ class QwenAgentApp:
             startup_delay = 5.0
         elif backend == "mlx-optiq":
             startup_delay = 15.0  # большие OptiQ-модели грузятся дольше
+        elif backend == "edge0-strata":
+            startup_delay = 3.0  # загрузка Edge0 продолжается до появления /health
         elif is_mlx:
             startup_delay = 3.0
         else:
@@ -757,10 +771,11 @@ class QwenAgentApp:
 
             model_label = self._launch_llama_server_process(model_key, progress_callback=report)
             UI.print_status(f"Выбрана модель: {model_label}", "info")
-            UI.print_status("Запуск сервера (может занять до 300 сек)...", "loading")
+            startup_timeout = max(300, int(self.get_model_presets().get(model_key or self.selected_model_key, {}).get("startup_timeout", 300)))
+            UI.print_status(f"Запуск сервера (ожидание до {startup_timeout} сек)...", "loading")
             report("checking", "Жду, пока сервер завершит загрузку и начнёт отвечать…")
 
-            for i in range(300, 0, -1):
+            for i in range(startup_timeout, 0, -1):
                 print(f"\r{Colors.BRIGHT_CYAN}⟳ Ожидание запуска: {i} сек...{Colors.RESET}", end="")
                 sys.stdout.flush()
 

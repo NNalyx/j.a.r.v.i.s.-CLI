@@ -37,12 +37,14 @@ from .user_prompt import ask_user
 from .wait import wait
 from .web import read_url, search_web
 from .find_person import find_person
+from .transcribe_media import transcribe_video
 
 
 class Tools:
     """Набор инструментов для агента (обратная совместимость)."""
 
     search_web = staticmethod(search_web)
+    transcribe_video = staticmethod(transcribe_video)
     find_person = staticmethod(find_person)
     read_url = staticmethod(read_url)
     run_cmd = staticmethod(run_cmd)

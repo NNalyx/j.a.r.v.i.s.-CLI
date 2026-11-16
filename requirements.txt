@@ -2,6 +2,7 @@
 fastapi
 uvicorn[standard]
 requests
+fastembed>=0.9,<1
 pywebview
 playwright
 zeroconf>=0.132

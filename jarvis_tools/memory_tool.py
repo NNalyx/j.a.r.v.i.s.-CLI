@@ -9,7 +9,8 @@ def manage_memory(operation: str, content: Optional[str] = None) -> ToolResult:
     """Управление долговременной памятью Jarvis
 
     Операции:
-    - read: Прочитать память
+    - read: Прочитать всю сохраненную память
+    - search: Найти релевантные записи семантически
     - write: Записать новую память (полная перезапись)
     - append: Добавить запись в память
     - clear: Очистить память
@@ -25,6 +26,12 @@ def manage_memory(operation: str, content: Optional[str] = None) -> ToolResult:
                 })
             else:
                 return ToolResult(False, None, result.get("error", "Read error"))
+
+        elif operation == "search":
+            if not content:
+                return ToolResult(False, None, "search operation requires a query in 'content'")
+            matches = MemoryManager.search(content, limit=8)
+            return ToolResult(True, {"operation": "search", "matches": matches})
 
         elif operation == "write":
             if not content:

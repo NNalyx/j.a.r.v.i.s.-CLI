@@ -31,6 +31,18 @@ def find_optiq_executable():
         return venv_path
     return "optiq"
 
+
+def find_edge0_infer_executable():
+    """Найти собранный Edge0 CLI в локальном checkout на macOS."""
+    candidates = [
+        os.path.join(Path.home(), "PycharmProjects", "Edge0", "edge0-infer", "build", "mac-metal", "bin", "edge0-infer"),
+        os.path.join(Path.home(), "PycharmProjects", "Edge0", "edge0-infer", "build", "cpu", "bin", "edge0-infer"),
+    ]
+    for candidate in candidates:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return candidates[0]
+
 # Общий конфиг рядом с исполняемым файлом проекта
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_FILE = BASE_DIR / "jarvis_config.json"
@@ -508,6 +520,48 @@ def presets_to_runtime(config: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, 
             }
             continue
 
+        if backend == "edge0-strata":
+            model_path = preset["model_path"]
+            port = int(preset.get("port", 8094))
+            reserve_mib = int(preset.get("vram_reserve_mib", 4096))
+            args = [
+                find_edge0_infer_executable(), "serve",
+                "--model", model_path,
+                "--device", "metal",
+                "--port", str(port),
+                "--context", str(int(preset.get("context_size", 32768))),
+                "--model-option", "du=q4",
+                "--model-option", "ple-io=direct",
+            ]
+            if reserve_mib:
+                args.extend(["--strata-arg", "--vram-reserve-mib", "--strata-arg", str(reserve_mib)])
+            if preset.get("resident_budget_gib"):
+                args.extend(["--strata-arg", "--resident-budget-gib", "--strata-arg", str(int(preset["resident_budget_gib"]))])
+            command = " ".join(f'"{arg}"' if " " in arg else arg for arg in args)
+            presets[key] = {
+                "label": preset["name"],
+                "description": f"Edge0 Strata / Metal | Контекст: {preset.get('context_size', 32768)} | резерв памяти: {reserve_mib} MiB",
+                "supports_images": False,
+                "cwd": str(BASE_DIR),
+                "args": args,
+                "command": command,
+                "config_index": i,
+                "backend": backend,
+                "port": port,
+                "context_size": int(preset.get("context_size", 32768)),
+                "max_tokens": int(preset.get("max_tokens", 8192)),
+                "temperature": float(preset.get("temperature", 0.6)),
+                "top_p": float(preset.get("top_p", 0.95)),
+                "min_p": float(preset.get("min_p", 0.0)),
+                "top_k": int(preset.get("top_k", 20)),
+                "repeat_penalty": float(preset.get("repeat_penalty", 1.0)),
+                "presence_penalty": float(preset.get("presence_penalty", 0.0)),
+                "frequency_penalty": float(preset.get("frequency_penalty", 0.0)),
+                "reasoning_effort": preset.get("reasoning_effort", "medium"),
+                "startup_timeout": int(preset.get("startup_timeout", 1800)),
+            }
+            continue
+
         llama_server_path = preset.get("llama_server_path", "")
         try:
             llama_server_path = resolve_llama_server_executable(llama_server_path)
@@ -521,10 +575,14 @@ def presets_to_runtime(config: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, 
             llama_server_path,
             "-m", preset["model_path"],
             "-c", str(preset["context_size"]),
-            "-ngl", str(preset["ngl"]),
             "--port", str(preset["port"]),
             "--host", "127.0.0.1",
         ]
+        # "auto" keeps llama.cpp's GPU-layer fitting enabled. A hard -ngl
+        # value prevents --fit from lowering offload to preserve device memory.
+        ngl = preset.get("ngl", 99)
+        if str(ngl).strip().lower() != "auto":
+            args.extend(["-ngl", str(ngl)])
         if preset.get("mmproj_path"):
             args.extend(["--mmproj", preset["mmproj_path"]])
         # Bonsai 2 PQ2/PTQ GGUF содержит специальные Prism-тензоры, но не
@@ -701,6 +759,32 @@ def preset_to_public(preset: Dict[str, Any], index: int, active_index: int) -> D
         })
         return base
 
+    if backend == "edge0-strata":
+        base.update({
+            "llama_server_path": "",
+            "mmproj_path": "",
+            "mtp_path": "",
+            "context_size": int(preset.get("context_size", 32768)),
+            "ngl": 0,
+            "supports_images": False,
+            "temperature": float(preset.get("temperature", 0.6)),
+            "max_tokens": int(preset.get("max_tokens", 8192)),
+            "top_p": float(preset.get("top_p", 0.95)),
+            "min_p": float(preset.get("min_p", 0.0)),
+            "top_k": int(preset.get("top_k", 20)),
+            "repeat_penalty": float(preset.get("repeat_penalty", 1.0)),
+            "presence_penalty": float(preset.get("presence_penalty", 0.0)),
+            "frequency_penalty": float(preset.get("frequency_penalty", 0.0)),
+            "reasoning_effort": preset.get("reasoning_effort", "medium"),
+            "vram_reserve_mib": int(preset.get("vram_reserve_mib", 4096)),
+            "resident_budget_gib": int(preset.get("resident_budget_gib", 0)),
+            "description": (
+                f"Edge0 Strata / Metal | Контекст: {preset.get('context_size', 32768)} | "
+                f"резерв памяти: {preset.get('vram_reserve_mib', 4096)} MiB"
+            ),
+        })
+        return base
+
     extra_args = preset.get("extra_args")
     if not isinstance(extra_args, list):
         extra_args = []
@@ -711,7 +795,10 @@ def preset_to_public(preset: Dict[str, Any], index: int, active_index: int) -> D
         "mtp_enabled": mtp_enabled,
         "chat_template_file": preset.get("chat_template_file", ""),
         "context_size": int(preset.get("context_size", 18432)),
-        "ngl": int(preset.get("ngl", 99)),
+        "ngl": (
+            "auto" if str(preset.get("ngl", 99)).strip().lower() == "auto"
+            else int(preset.get("ngl", 99))
+        ),
         "supports_images": bool(mmproj_path),
         "extra_args": extra_args,
         "description": (
@@ -750,7 +837,7 @@ def get_config_status() -> Dict[str, Any]:
 
 def build_preset_record(data: Dict[str, Any]) -> Dict[str, Any]:
     backend = str(data.get("backend", "llama-server")).strip().lower()
-    if backend not in ("llama-server", "mlx-vlm", "mlx-optiq", "mtplx"):
+    if backend not in ("llama-server", "mlx-vlm", "mlx-optiq", "mtplx", "edge0-strata"):
         backend = "llama-server"
 
     name = str(data.get("name") or "").strip() or "Default"
@@ -852,6 +939,42 @@ def build_preset_record(data: Dict[str, Any]) -> Dict[str, Any]:
         record["context_size"] = context_size
         record["mtp_enabled"] = bool(data.get("mtp_enabled", True))
         record["mtp_n_max"] = mtp_n_max
+        return record
+
+    if backend == "edge0-strata":
+        try:
+            context_size = int(data.get("context_size", 32768))
+            reserve_mib = int(data.get("vram_reserve_mib", 4096))
+            resident_budget_gib = int(data.get("resident_budget_gib", 0))
+            max_tokens = int(data.get("max_tokens", 8192))
+            temperature = float(data.get("temperature", 0.6))
+            top_p = float(data.get("top_p", 0.95))
+            min_p = float(data.get("min_p", 0.0))
+            top_k = int(data.get("top_k", 20))
+            repeat_penalty = float(data.get("repeat_penalty", 1.0))
+            presence_penalty = float(data.get("presence_penalty", 0.0))
+            frequency_penalty = float(data.get("frequency_penalty", 0.0))
+            reasoning_effort = str(data.get("reasoning_effort", "medium")).strip().lower()
+            startup_timeout = int(data.get("startup_timeout", 1800))
+        except (TypeError, ValueError) as error:
+            raise ValueError("Некорректные параметры Edge0") from error
+        if context_size <= 0 or reserve_mib < 0 or resident_budget_gib < 0 or max_tokens <= 0 or temperature < 0 or startup_timeout <= 0:
+            raise ValueError("Некорректные параметры Edge0")
+        record.update({
+            "context_size": context_size,
+            "vram_reserve_mib": reserve_mib,
+            "resident_budget_gib": resident_budget_gib,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "top_p": top_p,
+            "min_p": min_p,
+            "top_k": top_k,
+            "repeat_penalty": repeat_penalty,
+            "presence_penalty": presence_penalty,
+            "frequency_penalty": frequency_penalty,
+            "reasoning_effort": reasoning_effort,
+            "startup_timeout": startup_timeout,
+        })
         return record
 
     llama_server_path = resolve_llama_server_executable(data.get("llama_server_path", ""))

@@ -19,7 +19,7 @@ import webbrowser
 from copy import deepcopy
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 import uvicorn
@@ -188,8 +188,9 @@ active_stream_lock = threading.Lock()
 active_stream_bridge = None
 active_chat_id: Optional[str] = None
 
-AUTO_COMPACTION_THRESHOLD = 100_000
-AUTO_COMPACTION_KEEP_MESSAGES = 12
+AUTO_COMPACTION_THRESHOLD = 0.85
+AUTO_COMPACTION_KEEP_MESSAGES = 1
+AUTO_COMPACTION_MAX_ATTEMPTS_PER_TURN = 3
 
 # User-prompt state for synchronous ask_user tool
 pending_user_prompts: Dict[str, threading.Event] = {}
@@ -489,6 +490,32 @@ model_start_state: Dict[str, Any] = {
     "error_detail": "",
 }
 main_window = None
+_shutdown_lock = threading.Lock()
+_shutdown_complete = threading.Event()
+_shutdown_started = False
+
+
+class DesktopWindowAPI:
+    """Window-control bridge retained for the desktop webview integration."""
+
+    @staticmethod
+    def _window():
+        return webview.windows[0] if webview is not None and webview.windows else None
+
+    def close_window(self):
+        window = self._window()
+        if window is not None:
+            window.destroy()
+
+    def minimize_window(self):
+        window = self._window()
+        if window is not None:
+            window.minimize()
+
+    def toggle_fullscreen(self):
+        window = self._window()
+        if window is not None:
+            window.toggle_fullscreen()
 
 app = FastAPI(title="Jarvis Desktop")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -744,7 +771,7 @@ class EditMessageRequest(BaseModel):
 
 
 class SummarizeChatRequest(BaseModel):
-    keep_last_n: int = 12
+    keep_last_n: int = 1
     max_summary_tokens: int = 2048
 
 
@@ -1193,16 +1220,30 @@ def _build_transcript_for_summary(
 
     Returns:
         transcript: string containing the conversation to summarize.
-        kept_messages: recent messages that should be preserved verbatim.
+        kept_messages: the latest user request when keep_last_n is one, or a
+            recent complete turn for legacy callers requesting more messages.
     """
     if not isinstance(messages, list) or not messages:
         return "", []
 
-    # Skip the system message and preserve a complete recent conversation
-    # boundary. Never leave a tool result without its assistant tool call.
+    # Skip the primary instruction message. In the automatic one-message mode,
+    # the newest user request stays verbatim and all other history is summarized.
     body = messages[1:] if messages[0].get("role") == "system" else list(messages)
     keep_last_n = max(0, int(keep_last_n or 0))
-    if keep_last_n > 0 and len(body) > keep_last_n:
+    if keep_last_n == 1:
+        # Keep the latest user request verbatim. Everything else, including
+        # long tool results from the active turn, is represented by the summary.
+        latest_user_index = next(
+            (index for index in range(len(body) - 1, -1, -1) if body[index].get("role") == "user"),
+            None,
+        )
+        if latest_user_index is not None:
+            kept_messages = [deepcopy(body[latest_user_index])]
+            to_summarize = body[:latest_user_index] + body[latest_user_index + 1:]
+        else:
+            kept_messages = []
+            to_summarize = body
+    elif keep_last_n > 1 and len(body) > keep_last_n:
         keep_start = len(body) - keep_last_n
         while keep_start > 0 and body[keep_start].get("role") != "user":
             keep_start -= 1
@@ -1215,10 +1256,12 @@ def _build_transcript_for_summary(
     lines: List[str] = []
     for msg in to_summarize:
         role = str(msg.get("role") or "").lower()
-        if role == "system":
-            continue
         content = msg.get("content")
         text = _extract_text_from_agent_content(content)
+        if role == "system":
+            if text:
+                lines.append(f"Earlier compacted context: {text[:12000]}")
+            continue
         if role == "tool":
             tool_name = str(msg.get("name") or "tool")
             text = text[:6000]
@@ -1226,6 +1269,9 @@ def _build_transcript_for_summary(
             continue
 
         if role == "assistant" and msg.get("tool_calls"):
+            reasoning = str(msg.get("reasoning_content") or msg.get("reasoning") or "").strip()
+            if reasoning:
+                lines.append(f"Assistant reasoning: {reasoning[:6000]}")
             calls = []
             for call in msg.get("tool_calls") or []:
                 function = call.get("function") if isinstance(call, dict) else {}
@@ -1240,6 +1286,10 @@ def _build_transcript_for_summary(
         if text:
             label = "User" if role == "user" else "Assistant"
             lines.append(f"{label}: {text[:6000]}")
+        if role == "assistant" and not msg.get("tool_calls"):
+            reasoning = str(msg.get("reasoning_content") or msg.get("reasoning") or "").strip()
+            if reasoning:
+                lines.append(f"Assistant reasoning: {reasoning[:6000]}")
 
     return "\n\n".join(lines), kept_messages
 
@@ -1249,7 +1299,7 @@ def _compact_chat_context(
     keep_last_n: int = AUTO_COMPACTION_KEEP_MESSAGES,
     max_summary_tokens: int = 2048,
 ) -> Dict[str, Any]:
-    """Summarize old agent history and retain a complete recent tool chain."""
+    """Summarize conversation history and retain the latest user request."""
     record = _load_chat_record(chat_id)
     with chat_lock:
         transcript, kept_messages = _build_transcript_for_summary(
@@ -1310,7 +1360,8 @@ def _compact_chat_context(
 
     compacted_system = (
         "## Compacted conversation context\n"
-        "The following is a trusted summary of earlier work. Treat it as context, not as a new user request.\n\n"
+        "This is a trusted summary of the earlier conversation and progress so far. "
+        "Treat it as context, not as a new user request.\n\n"
         + summary
     )
     with chat_lock:
@@ -1323,12 +1374,29 @@ def _compact_chat_context(
         desktop_app.agent._invalidate_context_usage()
 
     existing_ui = record.get("ui_messages") if isinstance(record.get("ui_messages"), list) else []
-    compacted_ui = [
-        {"role": "system", "body": "Контекст автоматически сжат. Старые сообщения сохранены в кратком резюме.", "images": []},
-        *deepcopy(existing_ui[-keep_last_n:]),
-    ]
+    latest_user_ui = next(
+        (deepcopy(item) for item in reversed(existing_ui) if isinstance(item, dict) and item.get("role") == "user"),
+        None,
+    )
+    compacted_ui = [{
+        "role": "system",
+        "body": "Контекст сжат автоматически. Предыдущая переписка сведена к краткому резюме для продолжения задачи.",
+        "images": [],
+    }]
+    if latest_user_ui is not None:
+        compacted_ui.append(latest_user_ui)
     saved = _save_chat_state(chat_id, ui_messages=compacted_ui)
     return {"ok": True, "summary": summary, "record": saved, "kept_messages": len(kept_messages)}
+
+
+def _auto_compaction_threshold(capacity: int, max_tokens: int) -> int:
+    if capacity <= 0:
+        return 0
+    reserve = min(
+        max(2048, int(max_tokens or 0)),
+        max(2048, capacity // 4),
+    )
+    return max(1, min(int(capacity * AUTO_COMPACTION_THRESHOLD), capacity - reserve))
 
 
 def _format_tool_payload_for_ui(payload: Any) -> str:
@@ -1424,6 +1492,17 @@ def _fallback_ui_messages_from_agent_messages(agent_messages: Optional[List[Dict
             continue
 
         if role == "assistant":
+            reasoning = str(entry.get("reasoning_content") or entry.get("reasoning") or "").strip()
+            if reasoning:
+                thinking = ensure_thinking()
+                thinking["timeline"].append({
+                    "id": f"thought-{len(thinking['timeline']) + 1}",
+                    "type": "thought",
+                    "content": reasoning,
+                    "completed": True,
+                })
+                thinking["thoughtCount"] += 1
+
             tool_calls = entry.get("tool_calls")
             if isinstance(tool_calls, list) and tool_calls:
                 thinking = ensure_thinking()
@@ -1573,9 +1652,15 @@ def _rebuild_agent_messages_from_ui(
         messages.append({"role": "system", "content": ""})
 
     upper = len(ui_messages) if stop_before_index is None else min(stop_before_index, len(ui_messages))
+    pending_reasoning: List[str] = []
     for entry in ui_messages[:upper]:
         role = str(entry.get("role") or "system").strip().lower()
         if role == "thinking":
+            for item in entry.get("timeline") or []:
+                if isinstance(item, dict) and item.get("type") == "thought":
+                    thought = str(item.get("content") or "").strip()
+                    if thought:
+                        pending_reasoning.append(thought)
             continue
         if role not in {"user", "assistant"}:
             continue
@@ -1584,6 +1669,7 @@ def _rebuild_agent_messages_from_ui(
         images = entry.get("images") if isinstance(entry.get("images"), list) else []
 
         if role == "user":
+            pending_reasoning.clear()
             content: Any = []
             if body:
                 content.append({"type": "text", "text": body})
@@ -1596,7 +1682,11 @@ def _rebuild_agent_messages_from_ui(
                 messages.append({"role": "user", "content": content})
         else:
             if body:
-                messages.append({"role": "assistant", "content": body})
+                assistant_message = {"role": "assistant", "content": body}
+                if pending_reasoning:
+                    assistant_message["reasoning_content"] = "\n\n".join(pending_reasoning)
+                messages.append(assistant_message)
+            pending_reasoning.clear()
 
     return messages
 
@@ -1922,6 +2012,72 @@ def _derive_chat_title(ui_messages: Optional[List[Dict[str, Any]]], fallback: st
     return _derive_first_user_title(ui_messages, fallback=fallback)
 
 
+def _backfill_reasoning_from_ui(
+    ui_messages: List[Dict[str, Any]], agent_messages: List[Dict[str, Any]]
+) -> bool:
+    """Restore legacy thoughts from the UI timeline into the matching agent turn."""
+    ui_turns: List[Dict[str, Any]] = []
+    for entry in ui_messages:
+        role = str(entry.get("role") or "").strip().lower()
+        if role == "user":
+            ui_turns.append({
+                "body": _extract_text_from_agent_content(
+                    entry.get("body") or entry.get("content") or entry.get("text") or ""
+                ),
+                "thoughts": [],
+            })
+        elif role == "thinking" and ui_turns:
+            for item in entry.get("timeline") or []:
+                if isinstance(item, dict) and item.get("type") == "thought":
+                    thought = str(item.get("content") or "").strip()
+                    if thought:
+                        ui_turns[-1]["thoughts"].append(thought)
+
+    agent_user_positions: List[Tuple[int, str]] = []
+    for index, entry in enumerate(agent_messages):
+        if str(entry.get("role") or "").strip().lower() == "user":
+            body = _extract_text_from_agent_content(entry.get("content"))
+            agent_user_positions.append((index, re.sub(r"\s+", " ", body).strip()))
+
+    matched_positions: List[Optional[int]] = []
+    cursor = 0
+    for turn in ui_turns:
+        ui_body = re.sub(r"\s+", " ", turn["body"]).strip()
+        match_at = next(
+            (position for position in range(cursor, len(agent_user_positions))
+             if agent_user_positions[position][1] == ui_body),
+            None,
+        )
+        if match_at is None:
+            matched_positions.append(None)
+            continue
+        matched_positions.append(agent_user_positions[match_at][0])
+        cursor = match_at + 1
+
+    changed = False
+    for turn_index, turn in enumerate(ui_turns):
+        thoughts = turn["thoughts"]
+        start = matched_positions[turn_index]
+        if thoughts and start is not None:
+            next_start = next(
+                (position for position in matched_positions[turn_index + 1:] if position is not None),
+                len(agent_messages),
+            )
+            assistant_indices = [
+                index for index in range(start + 1, next_start)
+                if agent_messages[index].get("role") == "assistant"
+            ]
+            assistant_index = assistant_indices[-1] if assistant_indices else None
+        else:
+            assistant_index = None
+        if assistant_index is not None:
+            assistant = agent_messages[assistant_index]
+            if not str(assistant.get("reasoning_content") or assistant.get("reasoning") or "").strip():
+                assistant["reasoning_content"] = "\n\n".join(thoughts)
+                changed = True
+    return changed
+
+
 def _load_chat_record(chat_id: str) -> Dict[str, Any]:
     path = _chat_file_path(chat_id)
     if not os.path.exists(path):
@@ -1932,6 +2088,7 @@ def _load_chat_record(chat_id: str) -> Dict[str, Any]:
 
     agent_messages = _normalize_agent_messages(data.get("agent_messages"))
     ui_messages = _normalize_ui_messages(data.get("ui_messages"), agent_messages)
+    reasoning_backfilled = _backfill_reasoning_from_ui(ui_messages, agent_messages)
     data["id"] = _safe_chat_id(data.get("id") or chat_id)
     data["ui_messages"] = ui_messages
     data["agent_messages"] = agent_messages
@@ -1943,6 +2100,8 @@ def _load_chat_record(chat_id: str) -> Dict[str, Any]:
         data["title"] = _derive_chat_title(ui_messages) or "Новый чат"
     else:
         data["title"] = existing_title or _derive_chat_title(ui_messages) or "Новый чат"
+    if reasoning_backfilled:
+        data = _write_chat_record(data)
     return data
 
 
@@ -2014,6 +2173,8 @@ def _activate_chat(chat_id: str) -> Dict[str, Any]:
     record = _load_chat_record(chat_id)
     with chat_lock:
         desktop_app.agent.messages = deepcopy(record["agent_messages"])
+        desktop_app.agent.current_memory_query = ""
+        desktop_app.agent.current_memory_context = ""
         runtime = _normalize_chat_runtime_state(record.get("runtime_state"))
         desktop_app.agent.active_plan = deepcopy(runtime["active_plan"])
         desktop_app.agent.working_directory = runtime["working_directory"]
@@ -2145,6 +2306,40 @@ def _ensure_window_icon() -> Optional[str]:
         return WINDOW_ICON_PATH
 
     return _create_default_window_icon(WINDOW_ICON_PATH)
+
+
+def _style_macos_titlebar(window) -> None:
+    """Keep native macOS titlebar controls while matching Jarvis's black chrome."""
+    if sys.platform != "darwin":
+        return
+
+    def apply_styles() -> None:
+        try:
+            from webview.platforms import cocoa
+
+            native_window = getattr(window, "native", None)
+            if native_window is None:
+                return
+            black = cocoa.AppKit.NSColor.blackColor()
+            title_hidden = getattr(cocoa.AppKit, "NSWindowTitleHidden", 1)
+            native_window.setTitleVisibility_(title_hidden)
+            native_window.setBackgroundColor_(black)
+            titlebar = native_window.contentView().superview().subviews().lastObject()
+            if titlebar is not None and hasattr(titlebar, "setBackgroundColor_"):
+                titlebar.setBackgroundColor_(black)
+        except Exception as exc:
+            print(f"[Startup] Не удалось применить чёрный цвет заголовка окна: {exc}")
+
+    try:
+        # AppKit разрешает менять окно только на main-потоке Cocoa.
+        # Обработчик events.shown приходит из рабочего потока pywebview,
+        # поэтому диспатчим через PyObjCTools.AppHelper (тот же приём, что
+        # использует сам бэкенд webview.platforms.cocoa).
+        from PyObjCTools import AppHelper
+
+        AppHelper.callAfter(apply_styles)
+    except Exception as exc:
+        print(f"[Startup] Не удалось применить чёрный цвет заголовка окна: {exc}")
 
 
 def _set_windows_app_id() -> None:
@@ -2490,12 +2685,45 @@ def _estimate_context_used() -> int:
         if tool_call_id:
             total += agent._estimate_tokens(str(tool_call_id))
 
+    try:
+        total += agent._estimate_tokens(
+            json.dumps(agent.get_active_tools_definition(), ensure_ascii=False)
+        )
+    except Exception:
+        pass
+
     return total
 
 
 def _build_context_payload() -> Dict[str, Any]:
     capacity = _extract_context_capacity()
-    used = min(_estimate_context_used(), capacity)
+    exact_usage = None
+    agent = desktop_app.agent
+    if getattr(agent, "_active_stream_response", None) is None:
+        try:
+            exact_usage = agent.get_exact_context_usage()
+        except Exception:
+            exact_usage = None
+    elif (
+        getattr(agent, "last_exact_context_fingerprint", None)
+        and agent.last_exact_context_fingerprint == agent._context_history_fingerprint()
+    ):
+        cached_tokens = getattr(agent, "last_exact_context_tokens", None)
+        if isinstance(cached_tokens, int) and cached_tokens >= 0:
+            exact_usage = {
+                "used": cached_tokens,
+                "source": getattr(agent, "last_exact_context_source", "server_timings"),
+            }
+
+    exact_used = None
+    if isinstance(exact_usage, dict):
+        try:
+            exact_used = max(0, int(exact_usage.get("used")))
+        except (TypeError, ValueError):
+            exact_used = None
+
+    is_exact = exact_used is not None
+    used = exact_used if is_exact else _estimate_context_used()
     free = max(capacity - used, 0)
     ratio = (used / capacity) if capacity else 0.0
     return {
@@ -2504,7 +2732,12 @@ def _build_context_payload() -> Dict[str, Any]:
         "capacity": capacity,
         "free": free,
         "usage_ratio": ratio,
-        "source": "server_capacity_plus_local_estimate",
+        "exact": is_exact,
+        "source": (
+            exact_usage.get("source", "server_tokenizer")
+            if is_exact and isinstance(exact_usage, dict)
+            else "local_estimate"
+        ),
     }
 def _image_file_to_data_url(path: Optional[str]) -> Optional[str]:
     if not path or not os.path.isfile(path):
@@ -4251,33 +4484,6 @@ def api_chat_stream(request: ChatRequest, http_request: Request):
             change_session = None
             change_result = None
             with chat_lock:
-                # Compact before the next model request, while the current
-                # history is still available and no generation is running.
-                if target_chat_id:
-                    context_before = _build_context_payload()
-                    estimated_next = int(context_before.get("used", 0)) + desktop_app.agent._estimate_tokens(message)
-                    if estimated_next > AUTO_COMPACTION_THRESHOLD:
-                        bridge.push(
-                            "context_compaction_start",
-                            used=estimated_next,
-                            capacity=context_before.get("capacity", 0),
-                        )
-                        compacted = _compact_chat_context(
-                            target_chat_id,
-                            keep_last_n=AUTO_COMPACTION_KEEP_MESSAGES,
-                            max_summary_tokens=2048,
-                        )
-                        if compacted.get("ok"):
-                            bridge.push(
-                                "context_compaction_done",
-                                kept_messages=compacted.get("kept_messages", 0),
-                            )
-                        else:
-                            bridge.push(
-                                "context_compaction_error",
-                                message=compacted.get("reason", "Не удалось сжать контекст"),
-                            )
-
                 change_session = begin_change_session()
 
                 def finish_current_change_review():
@@ -4289,6 +4495,74 @@ def api_chat_stream(request: ChatRequest, http_request: Request):
                     previous_remote_executor = desktop_app.agent.remote_tool_executor
                     previous_remote_definitions = desktop_app.agent.remote_tool_definitions
                     previous_remote_context = desktop_app.agent.remote_execution_context
+                    previous_context_compaction_handler = getattr(
+                        desktop_app.agent, "context_compaction_handler", None
+                    )
+                    compaction_attempts = 0
+
+                    def compact_context_if_needed(force: bool = False) -> bool:
+                        nonlocal compaction_attempts
+                        if not target_chat_id:
+                            return False
+
+                        usage = _build_context_payload()
+                        used = max(0, int(usage.get("used") or 0))
+                        capacity = max(0, int(usage.get("capacity") or 0))
+                        threshold = _auto_compaction_threshold(
+                            capacity,
+                            getattr(desktop_app.agent, "max_tokens", 8192),
+                        )
+                        if not force and used < threshold:
+                            return False
+
+                        if compaction_attempts >= AUTO_COMPACTION_MAX_ATTEMPTS_PER_TURN:
+                            bridge.push(
+                                "context_compaction_error",
+                                message="Достигнут предел автоматических попыток сжатия в этой задаче.",
+                            )
+                            return False
+                        compaction_attempts += 1
+                        bridge.push("context_compaction_start", used=used, capacity=capacity)
+                        result = _compact_chat_context(
+                            target_chat_id,
+                            keep_last_n=AUTO_COMPACTION_KEEP_MESSAGES,
+                            max_summary_tokens=2048,
+                        )
+                        if not result.get("ok"):
+                            reason = str(result.get("reason") or "Не удалось создать краткое резюме")
+                            bridge.push("context_compaction_error", message=reason)
+                            return False
+
+                        compacted_usage = _build_context_payload()
+                        compacted_used = max(0, int(compacted_usage.get("used") or 0))
+                        compacted_capacity = max(0, int(compacted_usage.get("capacity") or capacity))
+                        compacted_threshold = _auto_compaction_threshold(
+                            compacted_capacity,
+                            getattr(desktop_app.agent, "max_tokens", 8192),
+                        )
+                        bridge.push(
+                            "context_compaction_done",
+                            used=compacted_used,
+                            capacity=compacted_capacity,
+                            free=max(0, compacted_capacity - compacted_used),
+                            usage_ratio=(compacted_used / compacted_capacity) if compacted_capacity else 0.0,
+                            exact=bool(compacted_usage.get("exact")),
+                            source=compacted_usage.get("source", "local_estimate"),
+                            previous_used=used,
+                            kept_messages=result.get("kept_messages", 0),
+                        )
+                        if compacted_threshold and compacted_used >= compacted_threshold:
+                            bridge.push(
+                                "context_compaction_error",
+                                message=(
+                                    "История сжата, но текущий запрос всё ещё не помещается в контекст "
+                                    f"({compacted_used:,} из {compacted_capacity:,} токенов)."
+                                ),
+                            )
+                            return False
+                        return True
+
+                    desktop_app.agent.context_compaction_handler = compact_context_if_needed
                     if remote_tool_config:
                         remote_connection_info = remote_tool_config["connection"]
 
@@ -4371,6 +4645,7 @@ def api_chat_stream(request: ChatRequest, http_request: Request):
                         desktop_app.agent.remote_tool_executor = previous_remote_executor
                         desktop_app.agent.remote_tool_definitions = previous_remote_definitions
                         desktop_app.agent.remote_execution_context = previous_remote_context
+                        desktop_app.agent.context_compaction_handler = previous_context_compaction_handler
                         desktop_app.agent.refresh_system_prompt()
                         # Очищаем оставшиеся события инструментов при завершении сессии
                         bridge.tool_events.clear()
@@ -4539,23 +4814,42 @@ def _disconnect_telegram_account() -> None:
 
 def shutdown_resources() -> None:
     """Gracefully release resources and revoke any outbound Jarvis pairing."""
-    _stop_remote_discovery()
-    try:
-        api_remote_pair_disconnect()
-    except Exception:
-        pass
-    try:
-        if desktop_app is not None:
-            desktop_app.shutdown_llama_server()
-    except Exception:
-        pass
+    global _shutdown_started
+    started_here = False
+    with _shutdown_lock:
+        if _shutdown_started:
+            should_wait = not _shutdown_complete.is_set()
+        else:
+            _shutdown_started = True
+            should_wait = False
+            started_here = True
+    if not started_here:
+        if should_wait:
+            _shutdown_complete.wait()
+        return
 
-    _disconnect_telegram_account()
+    try:
+        _stop_remote_discovery()
+        try:
+            api_remote_pair_disconnect()
+        except Exception:
+            pass
+        try:
+            if desktop_app is not None:
+                desktop_app.shutdown_llama_server()
+        except Exception:
+            pass
+
+        _disconnect_telegram_account()
+    finally:
+        _shutdown_complete.set()
 
 
 def _on_window_closing():
     """Handler called when the user closes the webview window."""
-    shutdown_resources()
+    # Keep the GUI event loop free: llama-server and account cleanup can take
+    # several seconds, so perform it off the window closing thread.
+    threading.Thread(target=shutdown_resources, name="jarvis-shutdown", daemon=True).start()
 
 
 # Register a fallback cleanup hook for normal interpreter shutdown.
@@ -4734,10 +5028,16 @@ def main():
             height=960,
             min_size=(1100, 850),
             maximized=True,
+            easy_drag=False,
+            frameless=False,
+            background_color="#000000",
+            js_api=DesktopWindowAPI(),
         )
 
         # Attach shutdown handler to window close event (both pywebview 4.x and 5.x APIs).
         try:
+            if hasattr(main_window, "events") and hasattr(main_window.events, "shown"):
+                main_window.events.shown += lambda: _style_macos_titlebar(main_window)
             if hasattr(main_window, "events") and hasattr(main_window.events, "closing"):
                 main_window.events.closing += _on_window_closing
             elif hasattr(main_window, "closing"):
@@ -4746,6 +5046,8 @@ def main():
             pass
 
         webview.start(icon=window_icon)
+        # Wait for the background close handler to finish cleanup before exit.
+        shutdown_resources()
     else:
         webbrowser.open(url)
         print("pywebview is not installed. Opening the interface in the browser.")

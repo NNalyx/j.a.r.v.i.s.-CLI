@@ -1468,6 +1468,7 @@ class UI:
 {Colors.BRIGHT_MAGENTA}17. manage_memory(operation, content){Colors.RESET}
    Manage Jarvis long-term memory
    Examples:
+   - Search: manage_memory(operation="search", content="query")
    - Read: manage_memory(operation="read")
    - Write: manage_memory(operation="write", content="text")
    - Append: manage_memory(operation="append", content="text")

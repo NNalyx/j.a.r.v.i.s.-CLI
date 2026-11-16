@@ -46,7 +46,12 @@ jarvis_telegram_account_secret.json
 jarvis_chats/
 jarvis_config.json
 jarvis_config.*.json
+# Config backups created by migration/tuning steps (e.g. *.before-*.bak)
+jarvis_config.json*backup*
+jarvis_config.json.before-*
+jarvis_config.*.json
 jarvis_memory.json
+jarvis_memory.sqlite3*
 jarvis_app_maps.json
 jarvis_voice_profile.json
 tts_output.wav

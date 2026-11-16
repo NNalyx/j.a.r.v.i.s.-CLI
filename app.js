@@ -212,6 +212,16 @@ const settingsCloseBtn = document.getElementById("settings-close-btn");
 const settingsDrawer = document.getElementById("settings-drawer");
 const settingsBackdrop = document.getElementById("settings-backdrop");
 
+const nativeTitlebar = document.getElementById("native-titlebar");
+if (nativeTitlebar) {
+  const enableNativeWindowControls = () => {
+    if (!window.pywebview?.api) return;
+    document.body.classList.add("native-window");
+  };
+  window.addEventListener("pywebviewready", enableNativeWindowControls, { once: true });
+  enableNativeWindowControls();
+}
+
 // System prompt profiles
 const systemPromptList = document.getElementById("system-prompt-list");
 const systemPromptHint = document.getElementById("system-prompt-hint");
@@ -326,7 +336,6 @@ const activeStreamingToolCalls = new Map();
 // ─── Smart auto-scroll / follow-mode ────────────────────────────────
 let streamFollowMode = true;
 let streamFollowButton = null;
-let streamFollowIgnoreScroll = false;
 const STREAM_FOLLOW_THRESHOLD = 80;
 
 function isChatLogNearBottom() {
@@ -335,10 +344,11 @@ function isChatLogNearBottom() {
   return distance <= STREAM_FOLLOW_THRESHOLD;
 }
 
+// No "ignore programmatic scroll" guard: auto-scroll only happens while we are already at the bottom,
+// so any scroll that moves away from it is by definition user-initiated and must disengage follow mode.
 function scrollToBottomIfFollowing() {
   if (!chatLog) return;
-  if (streamFollowMode) {
-    streamFollowIgnoreScroll = true;
+  if (streamFollowMode && !isChatLogNearBottom()) {
     chatLog.scrollTop = chatLog.scrollHeight;
   }
 }
@@ -376,11 +386,6 @@ function initStreamFollow() {
   createStreamFollowButton();
   if (!chatLog) return;
   chatLog.addEventListener("scroll", () => {
-    if (streamFollowIgnoreScroll) {
-      streamFollowIgnoreScroll = false;
-      updateStreamFollowButton();
-      return;
-    }
     const nearBottom = isChatLogNearBottom();
     if (nearBottom) {
       streamFollowMode = true;
@@ -1095,6 +1100,7 @@ async function toggleVoiceMessageRecording() {
       voiceMessageBtn.disabled = false;
       voiceMessageBtn.classList.remove("recording");
       voiceMessageBtn.setAttribute("aria-label", "Записать голосовое сообщение");
+      chatForm?.classList.remove("is-voice-recording");
       voiceRecordingStatus?.classList.add("hidden");
       voiceRecordingStatus?.classList.remove("is-transcribing");
     }
@@ -1107,9 +1113,10 @@ async function toggleVoiceMessageRecording() {
   }
 
   isRecordingVoiceMessage = true;
+  chatForm?.classList.add("is-voice-recording");
   voiceMessageStartedAt = Date.now();
   voiceMessageBtn.classList.add("recording");
-  voiceMessageBtn.setAttribute("aria-label", "Идёт запись...");
+  voiceMessageBtn.setAttribute("aria-label", "Остановить запись");
   setLiveStatus("🔴 Записываю голосовое сообщение. Нажмите ещё раз для остановки", true);
 
   try {
@@ -1123,6 +1130,7 @@ async function toggleVoiceMessageRecording() {
     voiceMessageStartedAt = 0;
     voiceMessageBtn.classList.remove("recording");
     voiceMessageBtn.setAttribute("aria-label", "Записать голосовое сообщение");
+    chatForm?.classList.remove("is-voice-recording");
     setLiveStatus(`Ошибка записи: ${error.message}`, false);
   }
 }
@@ -1131,9 +1139,10 @@ function updateVoiceAudioMeter(meter, level) {
   if (!meter) return;
   if (!meter.children.length) {
     const fragment = document.createDocumentFragment();
-    for (let index = 0; index < 18; index += 1) {
+    const barCount = meter === voiceRecordingMeter ? 64 : 18;
+    for (let index = 0; index < barCount; index += 1) {
       const bar = document.createElement("span");
-      const height = 0.12 + Math.abs(Math.sin((index + 1) * 1.61)) * 0.32;
+      const height = 0.12 + Math.abs(Math.sin((index + 1) * 1.61 + performance.now() / 150)) * 0.32;
       bar.style.setProperty("--bar-height", height.toFixed(2));
       fragment.appendChild(bar);
     }
@@ -1142,12 +1151,20 @@ function updateVoiceAudioMeter(meter, level) {
   const normalized = Math.max(0, Math.min(1, Number(level) || 0));
   meter.style.setProperty("--meter-level", normalized.toFixed(3));
   meter.classList.toggle("is-idle", normalized < 0.015);
+  if (meter === voiceRecordingMeter) {
+    const phase = performance.now() / 170;
+    meter.querySelectorAll("span").forEach((bar, index) => {
+      const shape = 0.12 + Math.abs(Math.sin(index * 0.43 + phase)) * 0.68;
+      bar.style.setProperty("--bar-height", shape.toFixed(2));
+    });
+  }
 }
 
 function updateVoiceRecordingIndicator(state) {
   const messageActive = Boolean(state.message_recording || state.message_transcribing);
   const wakeActive = Boolean(state.enabled && state.listening);
   const visible = messageActive || wakeActive;
+  chatForm?.classList.toggle("is-voice-recording", messageActive || isRecordingVoiceMessage);
   voiceRecordingStatus?.classList.toggle("hidden", !visible);
   const transcribing = Boolean(state.message_transcribing);
   voiceRecordingStatus?.classList.toggle("is-transcribing", transcribing);
@@ -1318,7 +1335,14 @@ function formatContextTitle(data) {
   const used = Number(data.used || 0);
   const capacity = Number(data.capacity || 0);
   const free = Number(data.free || 0);
-  return `Заполнено: ${used} из ${capacity}. Свободно: ${free}.`;
+  const format = (value) => new Intl.NumberFormat("ru-RU").format(value);
+  const source = String(data.source || "");
+  const accuracy = !data.exact
+    ? "Приблизительная оценка: токенизатор модели сейчас недоступен"
+    : source.startsWith("server_apply_template")
+      ? "Точный подсчёт по шаблону и токенизатору активной модели"
+      : "Фактический размер промпта по данным активной модели";
+  return `${accuracy}. Занято: ${format(used)} из ${format(capacity)} токенов. Свободно: ${format(free)}.`;
 }
 
 function updateContextIndicator(data) {
@@ -1327,13 +1351,14 @@ function updateContextIndicator(data) {
   }
 
   const capacity = Math.max(Number(data.capacity || 0), 1);
-  const used = Math.min(Math.max(Number(data.used || 0), 0), capacity);
+  const used = Math.max(Number(data.used || 0), 0);
   const free = Math.max(capacity - used, 0);
   const percent = Math.max(0, Math.min((used / capacity) * 100, 100));
 
   contextIndicator.style.setProperty("--context-fill", `${percent}%`);
   contextIndicatorText.textContent = `${Math.round(percent)}%`;
-  contextIndicator.title = formatContextTitle({ used, capacity, free });
+  contextIndicator.classList.toggle("is-estimated", !data.exact);
+  contextIndicator.title = formatContextTitle({ used, capacity, free, exact: Boolean(data.exact) });
   contextIndicator.setAttribute("aria-label", contextIndicator.title);
 }
 
@@ -1888,7 +1913,7 @@ async function summarizeChat(chatId) {
 
   const current = chatsCache.find((chat) => chat.id === chatId);
   const ok = window.confirm(
-    `Сжать контекст чата "${current?.title || "Новый чат"}"? Последние сообщения и цепочка текущих инструментов сохранятся.`
+    `Сжать контекст чата "${current?.title || "Новый чат"}"? Вся переписка будет сведена к краткому резюме, последнее сообщение останется полностью.`
   );
   if (!ok) {
     return;
@@ -1899,7 +1924,7 @@ async function summarizeChat(chatId) {
     const response = await fetch(`/api/chats/${encodeURIComponent(chatId)}/summarize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ keep_last_n: 12, max_summary_tokens: 2048 }),
+      body: JSON.stringify({ keep_last_n: 1, max_summary_tokens: 2048 }),
     });
     const data = await response.json();
     if (!response.ok || !data.ok) {
@@ -4415,11 +4440,13 @@ function renderPresetCards() {
 
   presetCardList.innerHTML = "";
   for (const preset of configCache.presets || []) {
-    const backendBadge = preset.backend === "mlx-vlm"
-      ? '<span class="preset-card-badge">MLX</span>'
-      : (preset.backend === "mtplx"
-        ? '<span class="preset-card-badge">MTPLX</span>'
-        : "");
+    const backendBadge = preset.backend === "edge0-strata"
+      ? '<span class="preset-card-badge">EDGE0</span>'
+      : (preset.backend === "mlx-vlm"
+        ? '<span class="preset-card-badge">MLX</span>'
+        : (preset.backend === "mtplx"
+          ? '<span class="preset-card-badge">MTPLX</span>'
+          : ""));
     const card = document.createElement("div");
     card.className = `preset-card${preset.selected ? " is-selected" : ""}`;
     card.dataset.presetIndex = String(preset.index);
@@ -5555,31 +5582,54 @@ async function readEventStream(response, handlers) {
 }
 
 async function runChatStream(message, images, options = {}) {
+
   const { skipUserAppend = false, isVoiceSubmission = false } = options;
 
-  const thinkingNode = createMessage("thinking", "");
-  let assistantNode = createMessage("assistant", "");
+  let thinkingNode = null;
+  let assistantNode = null;
+  const thinkingNodes = [];
+  let streamPhase = "";
   let assistantReplyClosed = false;
+  let contextCompactionNotice = null;
 
-  function getAssistantText() {
-    return assistantNode?.bodyNode?.textContent?.trim() || "";
+  function ensureThinkingNode() {
+    if (!thinkingNode || streamPhase === "assistant") {
+      thinkingNode = createMessage("thinking", "");
+      thinkingNodes.push(thinkingNode);
+    }
+    streamPhase = "thinking";
+    return thinkingNode;
   }
 
-  function ensureAssistantNode(nextText = "") {
-    if (assistantReplyClosed && String(nextText || "").trim()) {
+  function ensureAssistantNode() {
+    if (!assistantNode || streamPhase !== "assistant") {
+      const previousState = thinkingNode?.thinkingStateId
+        ? thinkingStates.get(thinkingNode.thinkingStateId)
+        : null;
+      if (previousState) finalizeThinkingState(previousState);
       assistantNode = createMessage("assistant", "");
-      assistantReplyClosed = false;
     }
+    streamPhase = "assistant";
+    assistantReplyClosed = false;
     return assistantNode;
   }
 
-  function ensureAssistantNodeForFinal(finalText = "") {
-    // При финальном событии всегда используем текущий узел, если ответ ещё
-    // не закрыт. Раньше сравнивали видимый текст с сырым, из-за markdown
-    // (жирный, списки и т.п.) это ошибочно создавало второй bubble.
-    return ensureAssistantNode(finalText);
+  function currentThinkingState() {
+    const node = ensureThinkingNode();
+    return node.thinkingStateId ? thinkingStates.get(node.thinkingStateId) : null;
   }
 
+  function finalizeThinkingNodes() {
+    for (const node of thinkingNodes) {
+      const state = node.thinkingStateId ? thinkingStates.get(node.thinkingStateId) : null;
+      if (!state) continue;
+      finalizeThinkingState(state);
+      if (!state.timeline.length) {
+        thinkingStates.delete(node.thinkingStateId);
+        node.article.remove();
+      }
+    }
+  }
   try {
     const useRemoteModel = clientModeWithoutModel && executionTargetSelect?.value === "remote";
     const delegateToolsToRemote = !clientModeWithoutModel && executionTargetSelect?.value === "remote";
@@ -5596,46 +5646,25 @@ async function runChatStream(message, images, options = {}) {
 
     await readEventStream(response, {
       thinking_delta: (payload) => {
-        if (thinkingNode.thinkingStateId) {
-          const state = thinkingStates.get(thinkingNode.thinkingStateId);
-          if (state) {
-            syncThoughtTimeline(state, payload.content || state.buffer);
-            scrollToBottomIfFollowing();
-          }
-        } else {
-          setMessageBody(thinkingNode.bodyNode, payload.content || "");
-          scrollToBottomIfFollowing();
-        }
+        const state = currentThinkingState();
+        if (state) syncThoughtTimeline(state, payload.content || state.buffer);
+        scrollToBottomIfFollowing();
       },
       thinking_block: (payload) => {
-        if (thinkingNode.thinkingStateId) {
-          const state = thinkingStates.get(thinkingNode.thinkingStateId);
-          if (state) {
-            syncThoughtTimeline(state, payload.content || state.buffer);
-            completeThoughtTimelineEntry(state);
-            scrollToBottomIfFollowing();
-          }
-        } else {
-          setMessageBody(thinkingNode.bodyNode, payload.content || "");
-          scrollToBottomIfFollowing();
+        const state = currentThinkingState();
+        if (state) {
+          syncThoughtTimeline(state, payload.content || state.buffer);
+          completeThoughtTimelineEntry(state);
         }
+        scrollToBottomIfFollowing();
       },
       content_delta: (payload) => {
         stopLiveStatusTimer();
         markGenerationProgressGenerating();
         bumpGenerationProgress(1.5);
         setLiveStatus("Печатает ответ...", true);
-        if (thinkingNode.thinkingStateId) {
-          const state = thinkingStates.get(thinkingNode.thinkingStateId);
-          if (state) {
-            setThinkingActivity(state, "Модель пишет ответ…", {
-              mode: "thinking",
-              lastEventKind: "content",
-            });
-            scheduleThinkingIdleActivity(state);
-          }
-        }
-        const node = ensureAssistantNode(payload.content || "");
+
+        const node = ensureAssistantNode();
         setMessageBody(node.bodyNode, payload.content || "", { stream: true });
         scrollToBottomIfFollowing();
       },
@@ -5672,77 +5701,63 @@ async function runChatStream(message, images, options = {}) {
       tool_call_start: (payload) => {
         stopLiveStatusTimer();
         const toolId = payload.tool_call_id;
-        if (!toolId || !thinkingNode.thinkingStateId) {
+        const state = currentThinkingState();
+        if (!toolId || !state) {
           return;
         }
         activeStreamingToolCalls.set(toolId, { toolName: payload.tool_name || "", stage: "start" });
-        const state = thinkingStates.get(thinkingNode.thinkingStateId);
-        if (state) {
-          upsertStreamingToolTimelineEntry(state, toolId, payload.tool_name || "", "", "start");
-          scrollToBottomIfFollowing();
-        }
+        upsertStreamingToolTimelineEntry(state, toolId, payload.tool_name || "", "", "start");
+        scrollToBottomIfFollowing();
       },
       tool_call_delta: (payload) => {
         const toolId = payload.tool_call_id;
-        if (!toolId || !thinkingNode.thinkingStateId) {
+        const state = currentThinkingState();
+        if (!toolId || !state) {
           return;
         }
         activeStreamingToolCalls.set(toolId, { toolName: payload.tool_name || "", stage: "delta" });
-        const state = thinkingStates.get(thinkingNode.thinkingStateId);
-        if (state) {
-          upsertStreamingToolTimelineEntry(state, toolId, payload.tool_name || "", payload.arguments_json || "", "delta");
-          scrollToBottomIfFollowing();
-        }
+        upsertStreamingToolTimelineEntry(state, toolId, payload.tool_name || "", payload.arguments_json || "", "delta");
+        scrollToBottomIfFollowing();
       },
       tool_call_finish: (payload) => {
         const toolId = payload.tool_call_id;
-        if (!toolId || !thinkingNode.thinkingStateId) {
+        const state = currentThinkingState();
+        if (!toolId || !state) {
           return;
         }
         activeStreamingToolCalls.set(toolId, { toolName: payload.tool_name || "", stage: "finish" });
-        const state = thinkingStates.get(thinkingNode.thinkingStateId);
-        if (state) {
-          upsertStreamingToolTimelineEntry(state, toolId, payload.tool_name || "", payload.arguments_json || "", "finish");
-          finalizeStreamingToolTimelineEntry(state, toolId);
-          scrollToBottomIfFollowing();
-        }
+        upsertStreamingToolTimelineEntry(state, toolId, payload.tool_name || "", payload.arguments_json || "", "finish");
+        finalizeStreamingToolTimelineEntry(state, toolId);
+        scrollToBottomIfFollowing();
       },
       tool_call_cancel: (payload) => {
         const toolId = payload.tool_call_id;
-        if (!toolId || !thinkingNode.thinkingStateId) {
+        const state = currentThinkingState();
+        if (!toolId || !state) {
           return;
         }
-        activeStreamingToolCalls.delete(toolId);
-        const state = thinkingStates.get(thinkingNode.thinkingStateId);
-        if (state) {
-          cancelStreamingToolTimelineEntry(
-            state,
-            toolId,
-            payload.reason || "Поток вызова инструмента прерван сервером"
-          );
-          scrollToBottomIfFollowing();
-        }
+        cancelStreamingToolTimelineEntry(
+          state,
+          toolId,
+          payload.reason || "Поток вызова инструмента прерван сервером"
+        );
+        scrollToBottomIfFollowing();
       },
       tool_call: (payload) => {
         stopLiveStatusTimer();
-      const statusText = `${getToolActivityMeta(payload.tool_name).label}…`;
+        const statusText = `${getToolActivityMeta(payload.tool_name).label}…`;
         setLiveStatus(statusText, true);
-        if (getAssistantText()) {
-          assistantReplyClosed = true;
-        }
+        const state = currentThinkingState();
         const iter = payload.iteration ?? 0;
         const toolId = payload.tool_call_id || `tool-${payload.tool_name}-${iter}`;
         if (payload.tool_name === "generate_image") {
           const args = payload.args || {};
-          const node = ensureAssistantNode("");
-          addImageGenPlaceholder(toolId, args.width, args.height, node.article);
+          const placeholderMessage = createMessage("assistant", "");
+          addImageGenPlaceholder(toolId, args.width, args.height, placeholderMessage.article);
         }
-        if (thinkingNode.thinkingStateId) {
-          const state = thinkingStates.get(thinkingNode.thinkingStateId);
-          if (state) {
-            promoteStreamingToolToWorking(state, toolId, payload.tool_name, payload.args || {});
-            scrollToBottomIfFollowing();
-          }
+        if (state) {
+          promoteStreamingToolToWorking(state, toolId, payload.tool_name, payload.args || {});
+          scrollToBottomIfFollowing();
         }
         activeStreamingToolCalls.delete(toolId);
       },
@@ -5751,6 +5766,7 @@ async function runChatStream(message, images, options = {}) {
         setLiveStatus("Ожидаем следующий шаг агента...", true);
         const iter = payload.iteration ?? 0;
         const toolId = payload.tool_call_id || `tool-${payload.tool_name}-${iter}`;
+        const state = currentThinkingState();
         if (payload.tool_name === "generate_image") {
           if (payload.success) {
             const images = payload.images || [];
@@ -5768,12 +5784,9 @@ async function runChatStream(message, images, options = {}) {
             }
           }
         }
-        if (thinkingNode.thinkingStateId) {
-          const state = thinkingStates.get(thinkingNode.thinkingStateId);
-          if (state) {
-            updateToolTimelineEntry(state, toolId, payload.success ? payload.data : payload.error, payload.success, payload.images || []);
-            scrollToBottomIfFollowing();
-          }
+        if (state) {
+          updateToolTimelineEntry(state, toolId, payload.success ? payload.data : payload.error, payload.success, payload.images || []);
+          scrollToBottomIfFollowing();
         }
         activeStreamingToolCalls.delete(toolId);
       },
@@ -5787,6 +5800,10 @@ async function runChatStream(message, images, options = {}) {
         const used = Number(payload.used || 0).toLocaleString("ru-RU");
         const capacity = Number(payload.capacity || 0).toLocaleString("ru-RU");
         setLiveStatus(`Сжимаю контекст: ${used} из ${capacity} токенов…`, true);
+        if (!contextCompactionNotice || !contextCompactionNotice.article.classList.contains("is-running")) {
+          contextCompactionNotice = addMessage("system", "Сжимаю контекст и сохраняю текущий шаг задачи…");
+          contextCompactionNotice.article.classList.add("context-compaction-note", "is-running");
+        }
         if (liveStatusProgress) {
           liveStatusProgress.classList.remove("hidden");
           liveStatusProgress.classList.add("is-indeterminate");
@@ -5794,12 +5811,35 @@ async function runChatStream(message, images, options = {}) {
           liveStatusProgressText.textContent = "…";
         }
       },
-      context_compaction_done: async () => {
+      context_compaction_done: async (payload) => {
         liveStatus?.classList.remove("is-compacting");
         if (liveStatusProgress) {
           liveStatusProgress.classList.remove("is-indeterminate");
           liveStatusProgress.classList.add("hidden");
         }
+        if (contextCompactionNotice) {
+          setMessageBody(
+            contextCompactionNotice.bodyNode,
+            "Контекст сжат автоматически. Jarvis продолжает задачу с сохранённым контекстом."
+          );
+          contextCompactionNotice.article.classList.remove("is-running");
+          contextCompactionNotice.article.classList.add("is-complete");
+
+          // Replace the old visible transcript with the compact marker while
+          // preserving the latest user request and this turn's newer events.
+          const userMessages = Array.from(chatLog.querySelectorAll(".message.user"));
+          const latestUser = userMessages[userMessages.length - 1];
+          if (latestUser && contextCompactionNotice.article.isConnected) {
+            chatLog.insertBefore(contextCompactionNotice.article, latestUser);
+            let previous = contextCompactionNotice.article.previousElementSibling;
+            while (previous) {
+              const toRemove = previous;
+              previous = previous.previousElementSibling;
+              if (toRemove.classList.contains("message")) toRemove.remove();
+            }
+          }
+        }
+        if (payload?.capacity) updateContextIndicator(payload);
         setLiveStatus("Контекст сжат, продолжаю задачу…", true);
         await refreshContext();
       },
@@ -5809,7 +5849,22 @@ async function runChatStream(message, images, options = {}) {
           liveStatusProgress.classList.remove("is-indeterminate");
           liveStatusProgress.classList.add("hidden");
         }
-        setLiveStatus(`Сжатие контекста не выполнено: ${payload.message || "неизвестная ошибка"}`, true);
+        const reason = payload.message || "неизвестная ошибка";
+        const wasCompacted = /история сжата|контекст сжат/i.test(reason);
+        if (contextCompactionNotice?.article.classList.contains("is-running")) {
+          setMessageBody(
+            contextCompactionNotice.bodyNode,
+            wasCompacted
+              ? `Контекст сжат, но продолжить не удалось: ${reason}`
+              : `Автоматическое сжатие контекста не выполнено: ${reason}`
+          );
+          contextCompactionNotice.article.classList.remove("is-running");
+          contextCompactionNotice.article.classList.add("is-error");
+        }
+        setLiveStatus(
+          wasCompacted ? `Контекст сжат, но запрос не помещается: ${reason}` : `Сжатие контекста не выполнено: ${reason}`,
+          true
+        );
       },
       error: (payload) => {
         stopLiveStatusTimer();
@@ -5847,42 +5902,17 @@ async function runChatStream(message, images, options = {}) {
         // накопленный текст и не портим markdown-форматирование.
         if (!finalText && currentRawText) {
           assistantReplyClosed = true;
-        } else if (!(assistantReplyClosed && currentRawText === finalText)) {
-          const node = ensureAssistantNodeForFinal(rawFinalContent);
+        } else if (finalText && currentRawText !== finalText) {
+          const node = ensureAssistantNode();
           setMessageBody(node.bodyNode, rawFinalContent);
-          if (finalText) {
-            assistantReplyClosed = true;
-          }
+          assistantReplyClosed = true;
         }
 
-        if (thinkingNode.thinkingStateId) {
-          const state = thinkingStates.get(thinkingNode.thinkingStateId);
-          if (state) {
-            finalizeThinkingState(state);
-          }
-        }
+        finalizeThinkingNodes();
 
-        let hasTimeline = false;
-        if (thinkingNode.thinkingStateId) {
-          const state = thinkingStates.get(thinkingNode.thinkingStateId);
-          if (state && state.timeline.length > 0) {
-            hasTimeline = true;
-          }
-        }
-
-        if (!hasTimeline) {
-          if (thinkingNode.thinkingStateId) {
-            const state = thinkingStates.get(thinkingNode.thinkingStateId);
-            if (!state?.expanded) {
-              thinkingStates.delete(thinkingNode.thinkingStateId);
-              thinkingNode.article.remove();
-            }
-          }
-        }
-
-        renderMessageSpeed(assistantNode.article, payload.timings);
+        if (assistantNode) renderMessageSpeed(assistantNode.article, payload.timings);
         const changedFiles = payload.changes?.files || [];
-        if (changedFiles.length) {
+        if (changedFiles.length && assistantNode) {
           const reviewButton = document.createElement("button");
           reviewButton.type = "button";
           reviewButton.className = "view-changes-action";
@@ -5906,23 +5936,22 @@ async function runChatStream(message, images, options = {}) {
       done: () => {
         stopLiveStatusTimer();
         clearImageGenPlaceholders();
+        if (!assistantNode) assistantNode = createMessage("assistant", "");
         if (!assistantNode.bodyNode.textContent.trim() && !assistantReplyClosed) {
           setMessageBody(assistantNode.bodyNode, "(пустой ответ)");
         }
-        if (thinkingNode.thinkingStateId) {
-          const state = thinkingStates.get(thinkingNode.thinkingStateId);
-          if (state) {
-            finalizeThinkingState(state);
-          }
-        }
+        finalizeThinkingNodes();
         setLiveStatus("Готов к работе", false);
         persistCurrentChatState();
       },
     });
   } catch (error) {
     stopLiveStatusTimer();
-    thinkingNode.article.remove();
-    assistantNode.article.remove();
+    for (const node of thinkingNodes) {
+      if (node.thinkingStateId) thinkingStates.delete(node.thinkingStateId);
+      node.article.remove();
+    }
+    assistantNode?.article.remove();
     addMessage("system", `Ошибка чата: ${error.message}`);
     setLiveStatus("Ошибка чата", false);
     await persistCurrentChatState({ immediate: true });

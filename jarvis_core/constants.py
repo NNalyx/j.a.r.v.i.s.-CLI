@@ -74,6 +74,7 @@ except ImportError:
 
 APP_MAPS_FILE = BASE_DIR / "jarvis_app_maps.json"
 MEMORY_FILE = BASE_DIR / "jarvis_memory.json"
+MEMORY_DB_FILE = BASE_DIR / "jarvis_memory.sqlite3"
 
 DEFAULT_MODEL_KEY = "preset_0"
 
