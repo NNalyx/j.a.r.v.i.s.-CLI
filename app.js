@@ -1741,10 +1741,23 @@ function captureChatUiState() {
       images = [];
     }
 
+    let changeReview = null;
+    if (article.dataset.changeReview) {
+      try {
+        const parsedChangeReview = JSON.parse(article.dataset.changeReview);
+        if (parsedChangeReview?.files?.length) {
+          changeReview = parsedChangeReview;
+        }
+      } catch {
+        // ignore corrupted record
+      }
+    }
+
     return {
       role,
       body: String(bodyNode?.dataset?.rawText || ""),
       images,
+      ...(changeReview ? { change_review: changeReview } : {}),
     };
   });
 }
@@ -1842,6 +1855,19 @@ function restoreThinkingMessage(snapshot) {
   renderThinkingTimeline(state);
 }
 
+function renderChangeReviewButton(article, review) {
+  if (!article || !review?.files?.length) return;
+  article.dataset.changeReview = JSON.stringify(review);
+  const existingBtn = article.querySelector(".view-changes-action");
+  if (existingBtn) existingBtn.remove();
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "view-changes-action";
+  btn.textContent = `Посмотреть изменения · ${review.files.length}`;
+  btn.addEventListener("click", () => showChangeReview(review));
+  article.appendChild(btn);
+}
+
 function restoreChatUiState(messages = []) {
   clearChatLog();
   for (const entry of messages) {
@@ -1854,7 +1880,7 @@ function restoreChatUiState(messages = []) {
       continue;
     }
 
-    createMessage(entry.role || "system", entry.body || entry.content || entry.text || "", { images: entry.images || [] });
+    createMessage(entry.role || "system", entry.body || entry.content || entry.text || "", { images: entry.images || [], changeReview: entry.change_review || null });
   }
   syncEmptyChatState();
 }
@@ -2282,6 +2308,9 @@ function createMessage(role, body = "", options = {}) {
   }
 
   setMessageBody(bodyNode, body, options);
+  if (role === "assistant" && options.changeReview) {
+    renderChangeReviewButton(article, options.changeReview);
+  }
   chatLog.appendChild(fragment);
   syncEmptyChatState();
   scrollToBottomIfFollowing();
@@ -5913,12 +5942,7 @@ async function runChatStream(message, images, options = {}) {
         if (assistantNode) renderMessageSpeed(assistantNode.article, payload.timings);
         const changedFiles = payload.changes?.files || [];
         if (changedFiles.length && assistantNode) {
-          const reviewButton = document.createElement("button");
-          reviewButton.type = "button";
-          reviewButton.className = "view-changes-action";
-          reviewButton.textContent = `Посмотреть изменения · ${changedFiles.length}`;
-          reviewButton.addEventListener("click", () => showChangeReview(payload.changes));
-          assistantNode.article.appendChild(reviewButton);
+          renderChangeReviewButton(assistantNode.article, payload.changes);
         }
       },
       user_prompt: (payload) => {

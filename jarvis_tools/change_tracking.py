@@ -4,21 +4,27 @@ import os
 import threading
 import uuid
 
-_local = threading.local()
 _lock = threading.RLock()
 _sessions = {}
 _MAX_SESSIONS = 80
+_current_session = None
+
+# ВАЖНО: инструменты выполняются в отдельном worker-потоке (agent.execute_tool_with_animation),
+# поэтому thread-local состояние здесь не работает — активная сессия хранится глобально.
 
 
 def begin_change_session():
+    global _current_session
     session_id = uuid.uuid4().hex
     session = {"id": session_id, "files": {}}
-    _local.session = session
+    with _lock:
+        _current_session = session
     return session
 
 
 def capture_before_write(path):
-    session = getattr(_local, "session", None)
+    with _lock:
+        session = _current_session
     if not session:
         return
     try:
@@ -36,8 +42,10 @@ def capture_before_write(path):
 
 
 def finish_change_session(session):
-    if getattr(_local, "session", None) is session:
-        _local.session = None
+    global _current_session
+    with _lock:
+        if _current_session is session:
+            _current_session = None
     files = []
     for path, entry in session["files"].items():
         try:

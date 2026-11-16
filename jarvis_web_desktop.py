@@ -1622,11 +1622,32 @@ def _normalize_ui_messages(
         body = str(entry.get("body") or entry.get("content") or entry.get("text") or "")
         if role in {"assistant", "system", "tool"} and not body.strip() and not images:
             continue
-        normalized.append({
+        entry_out = {
             "role": role,
             "body": body,
             "images": [str(image) for image in images if isinstance(image, str) and image.strip()],
-        })
+        }
+        change_review = entry.get("change_review")
+        if role == "assistant" and isinstance(change_review, dict):
+            review_files: List[Dict[str, Any]] = []
+            for file_entry in (change_review.get("files") or [])[:30]:
+                if not isinstance(file_entry, dict):
+                    continue
+                diff_text = str(file_entry.get("diff") or "")
+                if len(diff_text) > 128_000:
+                    diff_text = diff_text[:128_000] + "\n...[дифф обрезан]"
+                review_files.append({
+                    "path": str(file_entry.get("path") or ""),
+                    "diff": diff_text,
+                    "created": bool(file_entry.get("created")),
+                    "rollback_available": bool(file_entry.get("rollback_available", True)),
+                })
+            if review_files:
+                entry_out["change_review"] = {
+                    "id": str(change_review.get("id") or ""),
+                    "files": review_files,
+                }
+        normalized.append(entry_out)
 
     fallback = _fallback_ui_messages_from_agent_messages(agent_messages)
     if normalized and not _has_incomplete_ui_tail(normalized):
